@@ -1,33 +1,18 @@
 import asyncio
-import json
-import websockets
+from limitless_sdk import LimitlessWSClient
 from core.logging_utils import ws_buffer
 
-LIMITLESS_WS = "wss://api.limitless.exchange/ws"
-
 async def run_ws_client(session_state):
-    async with websockets.connect(LIMITLESS_WS) as ws:
+    async with LimitlessWSClient() as client:
         # Subscribe to multiple markets
-        markets = ["BTC-YESNO", "ETH-YESNO", "SOL-YESNO"]
-        for m in markets:
-            await ws.send(json.dumps({
-                "type": "subscribe",
-                "channel": "markets",
-                "market": m
-            }))
+        for m in ["BTC-YESNO", "ETH-YESNO", "SOL-YESNO"]:
+            await client.subscribe_market(m)
 
-        while True:
-            msg = await ws.recv()
-            data = json.loads(msg)
+        async for event in client.listen():
+            # SDK gives structured events
+            trade_str = f"{event.market} price={event.price} vol={event.volume}"
+            session_state.setdefault("trades", []).append(trade_str)
+            ws_buffer.append(trade_str)
 
-            market = data.get("market")
-            price = data.get("price")
-            volume = data.get("volume")
-
-            if market and price:
-                trade_str = f"{market} price={price} vol={volume}"
-                session_state.setdefault("trades", []).append(trade_str)
-                ws_buffer.append(trade_str)
-
-                if len(ws_buffer) > 500:
-                    ws_buffer.pop(0)
+            if len(ws_buffer) > 500:
+                ws_buffer.pop(0)
