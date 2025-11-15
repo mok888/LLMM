@@ -54,10 +54,10 @@ async def test_ws(market_id):
         async with websockets.connect(uri, ping_interval=None) as ws:
             print("[LLMM] WS CONNECT OK")
             if market_id:
-                sub = {
-                    "action": "subscribe",
-                    "channel": "markets",
-                    "ids": [market_id]
-                }
-                await ws.send(json.dumps(sub))
-                print(f"[LLMM] Subscribed to market
+               sub = {
+    "action": "subscribe",
+    "channel": "markets",
+    "ids": [market_id]
+}
+await ws.send(json.dumps(sub))
+print(f"[LLMM] Subscribed to market id={market_id}")
