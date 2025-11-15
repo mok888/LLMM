@@ -1,8 +1,3 @@
-#!/usr/bin/env python3
-"""
-Pull hourly markets from Limitless Exchange using LimitlessApiClient.
-"""
-
 from core.limitless_client import LimitlessApiClient
 
 def main():
