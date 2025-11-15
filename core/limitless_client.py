@@ -62,3 +62,10 @@ class LimitlessApiClient:
         resp = requests.post(url, json=payload)
         resp.raise_for_status()
         return resp.json()
+def get_hourly_markets(self, page=1, limit=10, sort="newest"):
+    url = f"{self.api_url}/markets/active?page={page}&limit={limit}&sortBy={sort}"
+    resp = requests.get(url)
+    resp.raise_for_status()
+    data = resp.json().get("data", [])
+    # Filter for hourly events
+    return [m for m in data if "Hourly" in m.get("tags", []) or "Hourly" in m.get("categories", [])]
