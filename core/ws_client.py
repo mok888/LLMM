@@ -1,5 +1,5 @@
 import asyncio
-from limitless_sdk import LimitlessWSClient
+from limitless_sdk import LimitlessClient
 from core.logging_utils import ws_buffer
 
 async def run_ws_client(session_state):
