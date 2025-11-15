@@ -11,6 +11,7 @@ PRIVATE_KEY = os.getenv("PRIVATE_KEY")
 BASE_RPC = os.getenv("BASE_RPC", "https://mainnet.base.org")
 BASE_CHAIN_ID = int(os.getenv("BASE_CHAIN_ID", "8453"))
 
+
 class LimitlessApiClient:
     def __init__(self, api_url=API_URL, private_key=PRIVATE_KEY, rpc_url=BASE_RPC, chain_id=BASE_CHAIN_ID):
         if not private_key:
@@ -25,12 +26,29 @@ class LimitlessApiClient:
         print(f"[LLMM] Connected to chain {self.chain_id}, block {self.web3.eth.block_number}")
 
     def get_active_markets(self, page=1, limit=10, sort="newest"):
+        """Fetch active markets."""
         url = f"{self.api_url}/markets/active?page={page}&limit={limit}&sortBy={sort}"
         resp = requests.get(url)
         resp.raise_for_status()
-        return resp.json()["data"]
+        return resp.json().get("data", [])
+
+    def get_market(self, market_id: int):
+        """Fetch a single market by ID."""
+        url = f"{self.api_url}/markets/{market_id}"
+        resp = requests.get(url)
+        resp.raise_for_status()
+        return resp.json()
+
+    def get_positions(self, address=None):
+        """Fetch positions for a given wallet address (defaults to client wallet)."""
+        addr = address or self.account.address
+        url = f"{self.api_url}/positions/{addr}"
+        resp = requests.get(url)
+        resp.raise_for_status()
+        return resp.json().get("data", [])
 
     def get_hourly_markets(self, page=1, limit=10, sort="newest"):
+        """Fetch active markets and filter for those tagged as Hourly."""
         url = f"{self.api_url}/markets/active?page={page}&limit={limit}&sortBy={sort}"
         resp = requests.get(url)
         resp.raise_for_status()
