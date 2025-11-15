@@ -1,28 +1,33 @@
 import os
 import asyncio
+import json
+import websockets
 from dotenv import load_dotenv
-from limitless_sdk import LimitlessClient
 from core.logging_utils import ws_buffer
 
 load_dotenv()
 
+LIMITLESS_WS_URL = "wss://api.limitless.exchange/ws"  # adjust if docs specify a different path
+
 async def run_ws_client(session_state):
-    private_key = os.getenv("PRIVATE_KEY")
-    if not private_key:
-        raise RuntimeError("PRIVATE_KEY not set in .env")
-
-    # Only pass private_key — no base_rpc
-    client = LimitlessClient(private_key=private_key)
-
-    await client.login()
-
-    async with client.ws() as ws:
+    async with websockets.connect(LIMITLESS_WS_URL) as ws:
+        # Subscribe to markets channel
         for m in ["BTC-YESNO", "ETH-YESNO", "SOL-YESNO"]:
-            await ws.subscribe("markets", market=m)
+            await ws.send(json.dumps({
+                "type": "subscribe",
+                "channel": "markets",
+                "market": m
+            }))
 
-        async for event in ws.listen():
-            trade_str = f"{event['market']} price={event['price']} vol={event['volume']}"
-            session_state.setdefault("trades", []).append(trade_str)
-            ws_buffer.append(trade_str)
-            if len(ws_buffer) > 500:
-                ws_buffer.pop(0)
+        while True:
+            msg = await ws.recv()
+            event = json.loads(msg)
+
+            # Defensive: only process market events
+            if event.get("type") == "market":
+                trade_str = f"{event['market']} price={event['price']} vol={event['volume']}"
+                session_state.setdefault("trades", []).append(trade_str)
+                ws_buffer.append(trade_str)
+
+                if len(ws_buffer) > 500:
+                    ws_buffer.pop(0)
