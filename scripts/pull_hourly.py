@@ -1,7 +1,5 @@
-#!/usr/bin/env python3
-"""
-Pull hourly markets from Limitless Exchange using LimitlessApiClient.
-"""
+if __name__ == "__main__":
+    main()
 
 from core.limitless_client import LimitlessApiClient
 
@@ -11,10 +9,7 @@ def main():
 
     print("[LLMM] Hourly events:")
     for m in hourly_markets:
-        title = m.get("title")
-        prices = m.get("prices")
-        expiration = m.get("expirationDate")
-        print(f"  {title} | Prices: {prices} | Expiration: {expiration}")
+        print(f"  {m['title']} | Prices: {m['prices']} | Expiration: {m['expirationDate']}")
 
 if __name__ == "__main__":
     main()
