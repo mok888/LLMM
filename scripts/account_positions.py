@@ -1,28 +1,15 @@
-from core.limitless_client import LimitlessApiClient
+def get_positions(self, address=None):
+    """
+    Attempt to fetch positions for a given wallet address.
+    NOTE: This endpoint may not exist in the public API.
+    """
+    addr = address or self.account.address
+    url = f"{self.api_url}/positions/{addr}"
+    resp = requests.get(url)
 
-def main():
-    client = LimitlessApiClient()
+    if resp.status_code == 404:
+        print(f"[LLMM] Positions endpoint not found for {addr}.")
+        return []
 
-    # Account info
-    info = client.get_account_info()
-    print("[LLMM] Account details:")
-    print(f"  Address: {info['address']}")
-    print(f"  Chain ID: {info['chain_id']}")
-    print(f"  Current Block: {info['block_number']}")
-    print(f"  RPC URL: {info['rpc_url']}")
-
-    # Current positions
-    positions = client.get_positions()
-    print("\n[LLMM] Current positions:")
-    if not positions:
-        print("  No open positions.")
-    else:
-        for p in positions:
-            market = p.get("market", {}).get("title")
-            side = p.get("side")
-            size = p.get("size")
-            pnl = p.get("pnl")
-            print(f"  {market} | Side: {side} | Size: {size} | PnL: {pnl}")
-
-if __name__ == "__main__":
-    main()
+    resp.raise_for_status()
+    return resp.json().get("data", [])
