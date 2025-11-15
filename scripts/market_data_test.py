@@ -47,17 +47,4 @@ def test_rest_hourly():
         return None, None
 
 # --- WebSocket: subscribe to market events ---
-async def test_ws(market_id):
-    uri = API_URL.replace("https", "wss") + "/ws"
-    print(f"[LLMM] Connecting WS: {uri}")
-    try:
-        async with websockets.connect(uri, ping_interval=None) as ws:
-            print("[LLMM] WS CONNECT OK")
-            if market_id:
-               sub = {
-    "action": "subscribe",
-    "channel": "markets",
-    "ids": [market_id]
-}
-await ws.send(json.dumps(sub))
-print(f"[LLMM] Subscribed to market id={market_id}")
+async def test
