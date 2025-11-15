@@ -4,7 +4,7 @@ from dotenv import load_dotenv
 from limitless_sdk import LimitlessClient
 from core.logging_utils import ws_buffer
 
-# Load environment variables from .env
+# Load environment variables
 load_dotenv()
 
 async def run_ws_client(session_state):
@@ -14,7 +14,7 @@ async def run_ws_client(session_state):
     if not private_key:
         raise RuntimeError("PRIVATE_KEY not set in .env")
 
-    # Initialize Limitless client with wallet key and optional RPC
+    # Initialize Limitless client with wallet key and Base RPC
     client = LimitlessClient(private_key=private_key, base_rpc=base_rpc)
 
     # Authenticate before using WebSocket
@@ -26,11 +26,9 @@ async def run_ws_client(session_state):
             await ws.subscribe("markets", market=m)
 
         async for event in ws.listen():
-            # Each event is a dict with market, price, volume
             trade_str = f"{event['market']} price={event['price']} vol={event['volume']}"
             session_state.setdefault("trades", []).append(trade_str)
             ws_buffer.append(trade_str)
 
-            # Cap buffer size
             if len(ws_buffer) > 500:
                 ws_buffer.pop(0)
