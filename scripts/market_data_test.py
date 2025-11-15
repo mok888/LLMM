@@ -12,16 +12,23 @@ API_URL = os.getenv("API_URL", "https://api.limitless.exchange/api-v1")
 # --- REST: discover markets and fetch hourly data ---
 def test_rest_hourly():
     try:
-        # Step 1: list markets
-        list_url = f"{API_URL}/markets"
+        # Step 1: list markets with limit
+        list_url = f"{API_URL}/markets?limit=5"
         print(f"[LLMM] Fetching markets from: {list_url}")
         r = requests.get(list_url, timeout=5)
+        print("[LLMM] Status:", r.status_code)
+
         if r.status_code != 200:
-            print(f"[LLMM] REST FAIL (status {r.status_code})")
             print("Body:", r.text[:200], "...")
             return None, None
 
-        markets = r.json()
+        # Try parsing JSON
+        try:
+            markets = r.json()
+        except Exception:
+            print("[LLMM] Response not JSON, body sample:", r.text[:200], "...")
+            return None, None
+
         if not markets or not isinstance(markets, list):
             print("[LLMM] No markets returned or invalid format.")
             return None, None
