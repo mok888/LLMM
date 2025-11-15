@@ -1,2 +1,3 @@
 def render_dashboard_rows(session_state):
-    return ["Asset Spread Countdown", "BTC-YESNO 0.02 00:29:57"]
+    trades = session_state.get("trades", [])
+    return trades[-10:]  # show last 10 trades

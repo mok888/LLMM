@@ -1,0 +1,6 @@
+aiohttp
+websockets
+PyYAML
+termcolor
+windows-curses; platform_system == "Windows"
+limitless-sdk
