@@ -8,25 +8,25 @@ from core.logging_utils import ws_buffer
 load_dotenv()
 
 async def run_ws_client(session_state):
-    private_key = os.getenv("WALLET_PRIVATE_KEY")
-    if not private_key:
-        raise RuntimeError("WALLET_PRIVATE_KEY not set in .env")
+    private_key = os.getenv("PRIVATE_KEY")
+    base_rpc = os.getenv("BASE_RPC")
 
-    # Initialize client with wallet private key
-    client = LimitlessClient(private_key=private_key)
+    if not private_key:
+        raise RuntimeError("PRIVATE_KEY not set in .env")
+
+    # Initialize Limitless client with wallet key and optional RPC
+    client = LimitlessClient(private_key=private_key, base_rpc=base_rpc)
 
     # Authenticate before using WebSocket
     await client.login()
 
     async with client.ws() as ws:
         # Subscribe to markets channel
-        await ws.subscribe("markets", market="BTC-YESNO")
-        await ws.subscribe("markets", market="ETH-YESNO")
-        await ws.subscribe("markets", market="SOL-YESNO")
+        for m in ["BTC-YESNO", "ETH-YESNO", "SOL-YESNO"]:
+            await ws.subscribe("markets", market=m)
 
-        while True:
-            event = await ws.recv()   # receive one event (dict)
-            # Build trade string from event payload
+        async for event in ws.listen():
+            # Each event is a dict with market, price, volume
             trade_str = f"{event['market']} price={event['price']} vol={event['volume']}"
             session_state.setdefault("trades", []).append(trade_str)
             ws_buffer.append(trade_str)
