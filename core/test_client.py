@@ -25,14 +25,15 @@ def main():
     print(f"[LLMM] Connected to chain {BASE_CHAIN_ID}, block {w3.eth.block_number}")
 
     # REST call: fetch markets
-    resp = requests.get(f"{API_URL}/markets/active?page=1&limit=10&sortBy=newest")
-    if resp.status_code == 200:
-        markets = resp.json()
-        print("[LLMM] Markets response:")
-        for m in markets[:5]:  # show first 5
-            print(f"  {m}")
-    else:
-        print(f"[LLMM] Error fetching markets: {resp.status_code} {resp.text}")
+   resp = requests.get(f"{API_URL}/markets/active?page=1&limit=10&sortBy=newest")
+if resp.status_code == 200:
+    markets = resp.json()
+    print("[LLMM] Markets response:")
+    for m in markets.get("data", [])[:5]:
+        print(f"  {m}")
+else:
+    print(f"[LLMM] Error fetching markets: {resp.status_code} {resp.text}")
+
 
 if __name__ == "__main__":
     main()
