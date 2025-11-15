@@ -49,10 +49,18 @@ class LimitlessApiClient:
         return resp.json()
 
     def get_positions(self, address=None):
-        """Fetch positions for a given wallet address (defaults to client wallet)."""
+        """
+        Fetch positions for a given wallet address (defaults to client wallet).
+        NOTE: This endpoint may not exist in the public API — safe fallback included.
+        """
         addr = address or self.account.address
         url = f"{self.api_url}/positions/{addr}"
         resp = requests.get(url)
+
+        if resp.status_code == 404:
+            print(f"[LLMM] Positions endpoint not found for {addr}.")
+            return []
+
         resp.raise_for_status()
         return resp.json().get("data", [])
 
@@ -65,82 +73,3 @@ class LimitlessApiClient:
         """Fetch active markets and filter for those tagged as Daily."""
         data = self.get_active_markets(page=page, limit=limit, sort=sort)
         return [m for m in data if "Daily" in m.get("tags", []) or "Daily" in m.get("categories", [])]
-
-    def get_top_volume_markets(self, top_n=10):
-        """Fetch active markets and return the top N by volume."""
-        markets = self.get_active_markets(limit=100, sort="newest")
-        sorted_markets = sorted(markets, key=lambda m: m.get("volume", 0), reverse=True)
-        return sorted_markets[:top_n]
-import os
-import requests
-from eth_account import Account
-from web3 import Web3
-from dotenv import load_dotenv
-
-load_dotenv()
-
-API_URL = os.getenv("API_URL", "https://api.limitless.exchange")
-PRIVATE_KEY = os.getenv("PRIVATE_KEY")
-BASE_RPC = os.getenv("BASE_RPC", "https://mainnet.base.org")
-BASE_CHAIN_ID = int(os.getenv("BASE_CHAIN_ID", "8453"))
-
-
-class LimitlessApiClient:
-    def __init__(self, api_url=API_URL, private_key=PRIVATE_KEY, rpc_url=BASE_RPC, chain_id=BASE_CHAIN_ID):
-        if not private_key:
-            raise RuntimeError("PRIVATE_KEY not set in .env")
-
-        self.api_url = api_url
-        self.account = Account.from_key(private_key)
-        self.web3 = Web3(Web3.HTTPProvider(rpc_url))
-        self.chain_id = chain_id
-
-        print(f"[LLMM] Wallet address: {self.account.address}")
-        print(f"[LLMM] Connected to chain {self.chain_id}, block {self.web3.eth.block_number}")
-
-    def get_account_info(self):
-        """Return wallet and chain details for operator scripts."""
-        return {
-            "address": self.account.address,
-            "chain_id": self.chain_id,
-            "block_number": self.web3.eth.block_number,
-            "rpc_url": self.web3.provider.endpoint_uri,
-        }
-
-    def get_active_markets(self, page=1, limit=10, sort="newest"):
-        """Fetch active markets."""
-        url = f"{self.api_url}/markets/active?page={page}&limit={limit}&sortBy={sort}"
-        resp = requests.get(url)
-        resp.raise_for_status()
-        return resp.json().get("data", [])
-
-    def get_market(self, market_id: int):
-        """Fetch a single market by ID."""
-        url = f"{self.api_url}/markets/{market_id}"
-        resp = requests.get(url)
-        resp.raise_for_status()
-        return resp.json()
-
-    def get_positions(self, address=None):
-        """Fetch positions for a given wallet address (defaults to client wallet)."""
-        addr = address or self.account.address
-        url = f"{self.api_url}/positions/{addr}"
-        resp = requests.get(url)
-        resp.raise_for_status()
-        return resp.json().get("data", [])
-
-    def get_hourly_markets(self, page=1, limit=10, sort="newest"):
-        """Fetch active markets and filter for those tagged as Hourly."""
-        data = self.get_active_markets(page=page, limit=limit, sort=sort)
-        return [m for m in data if "Hourly" in m.get("tags", []) or "Hourly" in m.get("categories", [])]
-
-    def get_daily_markets(self, page=1, limit=10, sort="newest"):
-        """Fetch active markets and filter for those tagged as Daily."""
-        data = self.get_active_markets(page=page, limit=limit, sort=sort)
-        return [m for m in data if "Daily" in m.get("tags", []) or "Daily" in m.get("categories", [])]
-
-    def get_top_volume_markets(self, top_n=10):
-        """Fetch active markets and return the top N by volume."""
-        markets = self.get_active_markets(limit=100, sort="newest")
-        sorted_markets = sorted(markets, key=lambda m: m.get("volume", 0), reverse=True)
-        return sorted_markets[:top_n]
