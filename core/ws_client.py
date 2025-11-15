@@ -6,12 +6,11 @@ from dotenv import load_dotenv
 from core.logging_utils import ws_buffer
 
 load_dotenv()
-
-LIMITLESS_WS_URL = "wss://api.limitless.exchange/ws"  # adjust if docs specify a different path
+WS_BASE_URL = os.getenv("WS_BASE_URL", "wss://api.limitless.exchange/markets")
 
 async def run_ws_client(session_state):
-    async with websockets.connect(LIMITLESS_WS_URL) as ws:
-        # Subscribe to markets channel
+    async with websockets.connect(WS_BASE_URL) as ws:
+        # Subscribe to markets
         for m in ["BTC-YESNO", "ETH-YESNO", "SOL-YESNO"]:
             await ws.send(json.dumps({
                 "type": "subscribe",
@@ -23,7 +22,6 @@ async def run_ws_client(session_state):
             msg = await ws.recv()
             event = json.loads(msg)
 
-            # Defensive: only process market events
             if event.get("type") == "market":
                 trade_str = f"{event['market']} price={event['price']} vol={event['volume']}"
                 session_state.setdefault("trades", []).append(trade_str)
