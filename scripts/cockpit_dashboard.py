@@ -1,53 +1,60 @@
-from core.limitless_client import LimitlessApiClient
+# scripts/live_ws_dashboard.py
+import asyncio, curses, json
+from core.socket_subs import LimitlessWebSocket
 
-def main():
-    client = LimitlessApiClient()
+REFRESH_INTERVAL = 1
 
-    # --- Account Info ---
-    info = client.get_account_info()
-    print("\n[LLMM] ACCOUNT INFO")
-    print("=" * 50)
-    print(f"Address:       {info['address']}")
-    print(f"Chain ID:      {info['chain_id']}")
-    print(f"Current Block: {info['block_number']}")
-    print(f"RPC URL:       {info['rpc_url']}")
+async def ws_listener(client, q):
+    while True:
+        msg = await client.recv()
+        try:
+            data = json.loads(msg)
+            await q.put(data)
+        except Exception as e:
+            print("[LLMM] Parse fail:", e)
 
-    # --- Current Positions ---
-    print("\n[LLMM] CURRENT POSITIONS")
-    print("=" * 50)
-    try:
-        positions = client.get_positions()
-        if not positions:
-            print("No open positions.")
+async def draw(stdscr, q):
+    curses.curs_set(0); stdscr.nodelay(True)
+    state = {"positions": [], "markets": {}}
+
+    while True:
+        while not q.empty():
+            d = await q.get()
+            ch = d.get("channel")
+            if ch == "positions":
+                state["positions"] = d.get("positions", [])
+            elif ch == "markets":
+                mid = d.get("marketId")
+                state["markets"][mid] = d
+
+        stdscr.clear()
+        stdscr.addstr(0, 0, "[LLMM] WebSocket cockpit — /markets")
+        stdscr.addstr(2, 0, "[Positions]")
+        if not state["positions"]:
+            stdscr.addstr(3, 2, "No open positions.")
         else:
-            for p in positions:
-                market = p.get("market", {}).get("title")
-                side = p.get("side")
-                size = p.get("size")
-                pnl = p.get("pnl")
-                print(f"{market} | Side: {side} | Size: {size} | PnL: {pnl}")
-    except Exception as e:
-        print(f"Positions unavailable: {e}")
+            for i, p in enumerate(state["positions"], start=3):
+                stdscr.addstr(i, 2, f"{p.get('market')} | {p.get('side')} | {p.get('size')} | PnL {p.get('pnl')}")
 
-    # --- Hourly Markets ---
-    print("\n[LLMM] HOURLY MARKETS")
-    print("=" * 50)
-    hourly = client.get_hourly_markets(limit=10)
-    if not hourly:
-        print("No hourly markets found.")
-    else:
-        for m in hourly:
-            print(f"{m['title']} | Prices: {m.get('prices')} | Exp: {m.get('expirationDate')}")
+        stdscr.addstr(10, 0, "[Markets]")
+        for i, (mid, m) in enumerate(state["markets"].items(), start=11):
+            stdscr.addstr(i, 2, f"{m.get('title')} | {m.get('prices')} | exp {m.get('expirationDate')}")
 
-    # --- Daily Markets ---
-    print("\n[LLMM] DAILY MARKETS")
-    print("=" * 50)
-    daily = client.get_daily_markets(limit=10)
-    if not daily:
-        print("No daily markets found.")
-    else:
-        for m in daily:
-            print(f"{m['title']} | Prices: {m.get('prices')} | Exp: {m.get('expirationDate')}")
+        stdscr.refresh()
+        await asyncio.sleep(REFRESH_INTERVAL)
+
+async def main():
+    client = LimitlessWebSocket()
+    await client.connect()
+    await client.subscribe_positions()
+    await client.subscribe_markets(["0xMARKETID1", "0xMARKETID2"])  # replace
+
+    q = asyncio.Queue()
+    await asyncio.gather(
+        ws_listener(client, q),
+        client.heartbeat(),
+        curses.wrapper(lambda s: asyncio.run(draw(s, q)))
+    )
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())
