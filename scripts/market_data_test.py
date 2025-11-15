@@ -57,4 +57,7 @@ def main():
     print("[LLMM] Starting real market data test...")
     market_id = test_rest()
     asyncio.run(test_ws(market_id))
-    print("[LLMM] Market
+    print("[LLMM] Market data test complete.")
+
+if __name__ == "__main__":
+    main()
