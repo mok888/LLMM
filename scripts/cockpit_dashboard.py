@@ -27,12 +27,5 @@ def main():
     for m in daily:
         print(f"{m['title']} | Prices: {m.get('prices')} | Exp: {m.get('expirationDate')}")
 
-    # --- Top Volume Markets ---
-    top_volume = client.get_top_volume_markets(top_n=10)
-    print("\n[LLMM] TOP 10 MARKETS BY VOLUME")
-    print("=" * 40)
-    for m in top_volume:
-        print(f"{m['title']} | Volume: {m.get('volume')} | Exp: {m.get('expirationDate')}")
-
 if __name__ == "__main__":
     main()
