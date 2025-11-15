@@ -25,7 +25,7 @@ def main():
     print(f"[LLMM] Connected to chain {BASE_CHAIN_ID}, block {w3.eth.block_number}")
 
     # REST call: fetch markets
-    resp = requests.get(f"{API_URL}/markets")
+    resp = requests.get(f"{API_URL}/markets/active?page=1&limit=10&sortBy=newest")
     if resp.status_code == 200:
         markets = resp.json()
         print("[LLMM] Markets response:")
