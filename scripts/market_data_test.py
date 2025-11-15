@@ -7,57 +7,42 @@ from dotenv import load_dotenv
 
 # Load environment variables
 load_dotenv()
-API_URL = os.getenv("API_URL", "https://api.limitless.exchange")
-MARKET_IDS = os.getenv("MARKET_IDS", "").split(",") if os.getenv("MARKET_IDS") else []
+API_URL = os.getenv("API_URL", "https://api.limitless.exchange/v1")
 
-# --- REST hourly market data ---
+# --- REST: discover markets and fetch hourly data ---
 def test_rest_hourly():
-    url = f"{API_URL}/markets/hourly?limit=5"
-    print(f"[LLMM] Testing REST hourly endpoint: {url}")
     try:
-        r = requests.get(url, timeout=5)
-        if r.status_code == 200:
-            print("[LLMM] REST CONNECT OK")
-            data = r.json()
-            print("[LLMM] Latest hourly markets:")
-            for m in data:
-                print(f" - {m.get('title')} | Prices: {m.get('prices')} | Exp: {m.get('expirationDate')}")
-        else:
-            print(f"[LLMM] REST CONNECT FAIL (status {r.status_code})")
+        # Step 1: list markets
+        list_url = f"{API_URL}/markets"
+        print(f"[LLMM] Fetching markets from: {list_url}")
+        r = requests.get(list_url, timeout=5)
+        if r.status_code != 200:
+            print(f"[LLMM] REST FAIL (status {r.status_code})")
             print("Body:", r.text)
+            return None, None
+
+        markets = r.json()
+        if not markets:
+            print("[LLMM] No markets returned.")
+            return None, None
+
+        # Pick first market
+        slug = markets[0]["slug"]
+        market_id = markets[0]["id"]
+        print(f"[LLMM] Using market slug={slug}, id={market_id}")
+
+        # Step 2: fetch hourly data for that slug
+        hourly_url = f"{API_URL}/markets/{slug}/hourly"
+        print(f"[LLMM] Fetching hourly data from: {hourly_url}")
+        hr = requests.get(hourly_url, timeout=5)
+        if hr.status_code == 200:
+            print("[LLMM] REST HOURLY OK")
+            print(json.dumps(hr.json(), indent=2))
+        else:
+            print(f"[LLMM] REST HOURLY FAIL (status {hr.status_code})")
+            print("Body:", hr.text)
+
+        return slug, market_id
     except Exception as e:
-        print(f"[LLMM] REST CONNECT ERROR: {e}")
-
-# --- WebSocket hourly market data ---
-async def test_ws_hourly():
-    uri = API_URL.replace("https", "wss") + "/ws"
-    print(f"[LLMM] Testing WS hourly endpoint: {uri}")
-    try:
-        async with websockets.connect(uri, ping_interval=None) as ws:
-            print("[LLMM] WS CONNECT OK")
-            if MARKET_IDS:
-                # Subscribe to hourly market updates
-                await ws.send(json.dumps({
-                    "action": "subscribe",
-                    "channel": "markets",
-                    "ids": MARKET_IDS
-                }))
-                print(f"[LLMM] Subscribed to markets: {MARKET_IDS}")
-                # Listen for a few events
-                for _ in range(3):
-                    msg = await ws.recv()
-                    data = json.loads(msg)
-                    print("[LLMM] WS EVENT:", data)
-            else:
-                print("[LLMM] No MARKET_IDS set in .env")
-    except Exception as e:
-        print(f"[LLMM] WS CONNECT ERROR: {e}")
-
-def main():
-    print("[LLMM] Starting market data test...")
-    test_rest_hourly()
-    asyncio.run(test_ws_hourly())
-    print("[LLMM] Market data test complete.")
-
-if __name__ == "__main__":
-    main()
+        print(f"[LLMM] REST ERROR: {e}")
+        return
