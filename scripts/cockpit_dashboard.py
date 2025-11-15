@@ -13,19 +13,6 @@ def main():
     print(f"RPC URL:       {info['rpc_url']}")
 
     # --- Current Positions ---
-    positions = client.get_positions()
-    print("\n[LLMM] CURRENT POSITIONS")
-    print("=" * 40)
-    if not positions:
-        print("No open positions.")
-    else:
-        for p in positions:
-            market = p.get("market", {}).get("title")
-            side = p.get("side")
-            size = p.get("size")
-            pnl = p.get("pnl")
-            print(f"{market} | Side: {side} | Size: {size} | PnL: {pnl}")
-
     # --- Hourly Markets ---
     hourly = client.get_hourly_markets(limit=10)
     print("\n[LLMM] HOURLY MARKETS")
