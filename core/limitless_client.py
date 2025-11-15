@@ -25,6 +25,15 @@ class LimitlessApiClient:
         print(f"[LLMM] Wallet address: {self.account.address}")
         print(f"[LLMM] Connected to chain {self.chain_id}, block {self.web3.eth.block_number}")
 
+    def get_account_info(self):
+        """Return wallet and chain details for operator scripts."""
+        return {
+            "address": self.account.address,
+            "chain_id": self.chain_id,
+            "block_number": self.web3.eth.block_number,
+            "rpc_url": self.web3.provider.endpoint_uri,
+        }
+
     def get_active_markets(self, page=1, limit=10, sort="newest"):
         """Fetch active markets."""
         url = f"{self.api_url}/markets/active?page={page}&limit={limit}&sortBy={sort}"
@@ -44,21 +53,4 @@ class LimitlessApiClient:
         addr = address or self.account.address
         url = f"{self.api_url}/positions/{addr}"
         resp = requests.get(url)
-        resp.raise_for_status()
-        return resp.json().get("data", [])
-
-    def get_hourly_markets(self, page=1, limit=10, sort="newest"):
-        """Fetch active markets and filter for those tagged as Hourly."""
-        url = f"{self.api_url}/markets/active?page={page}&limit={limit}&sortBy={sort}"
-        resp = requests.get(url)
-        resp.raise_for_status()
-        data = resp.json().get("data", [])
-        return [m for m in data if "Hourly" in m.get("tags", []) or "Hourly" in m.get("categories", [])]
-
-    def get_daily_markets(self, page=1, limit=10, sort="newest"):
-        """Fetch active markets and filter for those tagged as Daily."""
-        url = f"{self.api_url}/markets/active?page={page}&limit={limit}&sortBy={sort}"
-        resp = requests.get(url)
-        resp.raise_for_status()
-        data = resp.json().get("data", [])
-        return [m for m in data if "Daily" in m.get("tags", []) or "Daily" in m.get("categories", [])]
+        resp.raise_for_status
