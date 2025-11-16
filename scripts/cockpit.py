@@ -1,77 +1,154 @@
 #!/usr/bin/env python3
 """
-Cockpit Script
-- Reads hourly_markets.json
-- Prints lifecycle banners for new/removed markets
-- Subscribes/unsubscribes to live price updates via WebSocket
+Limitless Exchange WebSocket Client - Streamlined Example
+Connect to real-time market data and position updates
 """
 
 import asyncio
 import json
-import websockets
+import logging
 import os
+from typing import Optional, List
 
-API_WS_URL = "wss://api.limitless.exchange/ws"
+import socketio
+from common_utils import authenticate, get_signing_message
 
-async def cockpit():
-    last_ids = set()
-    subscribed = set()
+logging.basicConfig(level=logging.WARNING, format='%(message)s')
+logger = logging.getLogger(__name__)
 
-    async with websockets.connect(API_WS_URL) as ws:
-        while True:
-            # Load latest discovery file
-            if os.path.exists("hourly_markets.json"):
-                with open("hourly_markets.json") as f:
-                    markets = json.load(f)
-                current_ids = {m["id"] for m in markets}
+##### Global configuration
+MARKET_ADDRESSES = ["0x..."]  # Replace with actual hourly market addresses
 
-                # Lifecycle banners
-                new_ids = current_ids - last_ids
-                removed_ids = last_ids - current_ids
+class LimitlessWebSocket:
+    """
+    Streamlined WebSocket client for Limitless Exchange
+    Handles authentication, connection, subscription, and events
+    """
 
-                if new_ids:
-                    print(f"[LLMM] NEW hourly markets discovered:")
-                    for m in markets:
-                        if m["id"] in new_ids:
-                            title = m.get("title") or "N/A"
-                            deadline = m.get("expirationDate") or "N/A"
-                            print(f"    + {m['id']} | {title} | Deadline {deadline}")
+    def __init__(self, websocket_url: str = "wss://ws.limitless.exchange", private_key: Optional[str] = None):
+        self.websocket_url = websocket_url
+        self.private_key = private_key
+        self.session_cookie = None
+        self.connected = False
+        self.subscribed_markets: List[str] = []
+        self.sio = socketio.AsyncClient(logger=False, engineio_logger=False)
+        self._setup_handlers()
 
-                if removed_ids:
-                    print(f"[LLMM] REMOVED hourly markets:")
-                    for mid in removed_ids:
-                        print(f"    - {mid}")
+    def _setup_handlers(self):
+        """Setup essential event handlers"""
 
-                # Subscribe to new IDs
-                for mid in new_ids:
-                    if mid not in subscribed:
-                        sub_msg = {"type": "subscribe", "channel": "market", "id": mid}
-                        await ws.send(json.dumps(sub_msg))
-                        print(f"[LLMM] Subscribed to market {mid}")
-                        subscribed.add(mid)
+        @self.sio.event(namespace='/markets')
+        async def connect():
+            self.connected = True
+            print("✅ Connected to /markets")
+            if self.session_cookie:
+                await self.sio.emit('authenticate', f'Bearer {self.session_cookie}', namespace='/markets')
+            if self.subscribed_markets:
+                await asyncio.sleep(1)
+                await self._resubscribe()
 
-                # Unsubscribe from removed IDs
-                for mid in removed_ids:
-                    if mid in subscribed:
-                        unsub_msg = {"type": "unsubscribe", "channel": "market", "id": mid}
-                        await ws.send(json.dumps(unsub_msg))
-                        print(f"[LLMM] Unsubscribed from market {mid}")
-                        subscribed.remove(mid)
+        @self.sio.event(namespace='/markets')
+        async def disconnect():
+            self.connected = False
+            print("❌ Disconnected from /markets")
 
-                last_ids = current_ids
+        @self.sio.event(namespace='/markets')
+        async def authenticated(data):
+            print(f"[LLMM] Authenticated: {json.dumps(data)}")
 
-            # Listen for live updates
-            try:
-                msg = await asyncio.wait_for(ws.recv(), timeout=5)
-                data = json.loads(msg)
-                if "marketId" in data:
-                    mid = data["marketId"]
-                    prices = data.get("prices")
-                    volume = data.get("volume")
-                    print(f"[LLMM] Market {mid} update → Prices {prices} | Volume {volume}")
-            except asyncio.TimeoutError:
-                # No message in 5s, loop back to reload file
-                pass
+        @self.sio.event(namespace='/markets')
+        async def newPriceData(data):
+            print(f"[LLMM] Price update: {json.dumps(data)}")
+
+        @self.sio.event(namespace='/markets')
+        async def positions(data):
+            print(f"[LLMM] Positions: {json.dumps(data)}")
+
+        @self.sio.event(namespace='/markets')
+        async def system(data):
+            print(f"[LLMM] System: {json.dumps(data)}")
+
+        @self.sio.event(namespace='/markets')
+        async def exception(data):
+            print(f"[LLMM] Exception: {json.dumps(data)}")
+
+    async def authenticate(self):
+        """Get session cookie for authentication"""
+        if not self.private_key:
+            print("💡 No private key - running in public mode")
+            return
+        try:
+            print("🔐 Authenticating with private key...")
+            signing_message = get_signing_message()
+            self.session_cookie, user_data = authenticate(self.private_key, signing_message)
+            print(f"✅ Authenticated as: {user_data['account']}")
+        except Exception as e:
+            print(f"❌ Authentication failed: {e}")
+
+    async def connect(self):
+        """Connect to WebSocket"""
+        await self.authenticate()
+        print(f"🔌 Connecting to {self.websocket_url}...")
+        connect_options = {'transports': ['websocket']}
+        if self.session_cookie:
+            connect_options['headers'] = {'Cookie': f'limitless_session={self.session_cookie}'}
+            print("🍪 Adding session cookie to connection headers")
+        await self.sio.connect(self.websocket_url, namespaces=['/markets'], **connect_options)
+        await asyncio.sleep(0.5)
+        if self.connected:
+            print("✅ Successfully connected")
+        else:
+            print("❌ Connection failed")
+
+    async def subscribe_markets(self, market_addresses: List[str]):
+        """Subscribe to market price updates"""
+        if not self.connected:
+            print("❌ Not connected - call connect() first")
+            return
+        print(f"📊 Subscribing to {len(market_addresses)} markets")
+        payload = {'marketAddresses': market_addresses}
+        await self.sio.emit('subscribe_market_prices', payload, namespace='/markets')
+        print("✅ Subscribed to market prices")
+        if self.session_cookie:
+            await self.sio.emit('subscribe_positions', payload, namespace='/markets')
+            print("✅ Subscribed to positions")
+        self.subscribed_markets.extend(addr for addr in market_addresses if addr not in self.subscribed_markets)
+
+    async def _resubscribe(self):
+        """Re-subscribe after reconnection"""
+        if self.subscribed_markets:
+            await self.subscribe_markets(self.subscribed_markets)
+
+    async def disconnect(self):
+        """Disconnect from WebSocket"""
+        if self.connected:
+            await self.sio.disconnect()
+            print("👋 Disconnected")
+
+    async def wait(self):
+        """Keep connection alive"""
+        await self.sio.wait()
+
+def get_default_markets():
+    """Helper function to access global market addresses"""
+    return MARKET_ADDRESSES
+
+async def main():
+    """Main execution function"""
+    global MARKET_ADDRESSES
+    private_key = os.getenv('PRIVATE_KEY')
+    print("=" * 50)
+    print("Limitless Exchange WebSocket Client")
+    print("=" * 50)
+    client = LimitlessWebSocket(private_key=private_key)
+    await client.connect()
+    if MARKET_ADDRESSES:
+        await client.subscribe_markets(MARKET_ADDRESSES)
+    else:
+        print("⚠️ No market addresses configured")
+        return
+    print("📡 Listening for events... Press Ctrl+C to stop")
+    await client.wait()
 
 if __name__ == "__main__":
-    asyncio.run(cockpit())
+    asyncio.run(main())
