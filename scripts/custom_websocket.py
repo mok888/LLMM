@@ -2,14 +2,10 @@
 """
 Custom Cockpit WebSocket Client
 - Connects to Limitless Exchange
-- Subscriptions with marketAddresses payload (fallback commented)
-- Formatted price banners for multiple event names
+- Attempts multiple subscribe event names and payload shapes
+- Binds many common event names and namespaces
 - Catch-all logs top-level keys, full JSON, recursively finds odds-like objects
-- Root namespace fallbacks to capture emissions on "/"
-- Heartbeat with timestamp
-- Periodic probe to request snapshots/pings (server-tolerant)
-- Silence monitor warns if no non-system events arrive
-- Clean disconnect
+- Heartbeat, periodic probe, silence monitor, clean disconnect
 """
 
 import asyncio
@@ -25,11 +21,10 @@ class CustomWebSocket:
         self.private_key = private_key
         self.session_cookie = None
         self.connected = False
-        self.subscribed_markets = []  # conditionIds or addresses (hashes)
-        self.market_titles = {}       # conditionId → title
+        self.subscribed_markets = []  # marketAddresses or ids
+        self.market_titles = {}       # address/id -> title
         self.last_non_system_event_ts = None
 
-        # Toggle transport logs for debugging mapping issues
         self.sio = socketio.AsyncClient(
             logger=verbose_logs,
             engineio_logger=verbose_logs
@@ -37,7 +32,7 @@ class CustomWebSocket:
         self._setup_handlers()
 
     def _setup_handlers(self):
-        """Setup event handlers"""
+        """Setup event handlers for /markets and helpful fallbacks"""
 
         # ===== Namespace: /markets =====
         @self.sio.event(namespace="/markets")
@@ -59,7 +54,7 @@ class CustomWebSocket:
         async def system(data):
             print(f"[LLMM] System: {json.dumps(data)}")
 
-        # Odds handlers — cover common names
+        # Common price event names
         @self.sio.event(namespace="/markets")
         async def newPriceData(data):
             await self._print_price_banner(data)
@@ -72,7 +67,15 @@ class CustomWebSocket:
         async def priceUpdate(data):
             await self._print_price_banner(data)
 
-        # Generic handlers that some servers use
+        @self.sio.event(namespace="/markets")
+        async def prices(data):
+            await self._print_price_banner(data)
+
+        @self.sio.event(namespace="/markets")
+        async def market_update(data):
+            await self._print_price_banner(data)
+
+        # Generic handlers and catch-all
         @self.sio.event(namespace="/markets")
         async def data(data):
             await self._maybe_highlight_and_dump("data", data, ns="/markets")
@@ -85,7 +88,6 @@ class CustomWebSocket:
         async def message(data):
             await self._maybe_highlight_and_dump("message", data, ns="/markets")
 
-        # Catch-all logger: dump full JSON, keys, and highlight odds
         @self.sio.on("*", namespace="/markets")
         async def catch_all(event, data):
             await self._maybe_highlight_and_dump(event, data, ns="/markets")
@@ -99,37 +101,56 @@ class CustomWebSocket:
         async def catch_all_root(event, data):
             await self._maybe_highlight_and_dump(event, data, ns="/")
 
-    async def _maybe_highlight_and_dump(self, event, data, ns):
-        """Dump event payload, print keys, and recursively find any odds objects"""
+        # ===== Extra namespace fallback: /prices =====
         try:
-            # Mark last non-system event
+            @self.sio.event(namespace="/prices")
+            async def connect_prices():
+                print("✅ Connected to /prices")
+        except Exception:
+            pass
+
+        try:
+            @self.sio.on("*", namespace="/prices")
+            async def catch_all_prices(event, data):
+                await self._maybe_highlight_and_dump(event, data, ns="/prices")
+        except Exception:
+            pass
+
+    async def _maybe_highlight_and_dump(self, event, data, ns):
+        """Dump event payload, print keys, and recursively find any odds-like objects"""
+        try:
             if event != "system":
                 self.last_non_system_event_ts = time()
 
-            # Keys summary
             if isinstance(data, dict):
                 keys = list(data.keys())
                 print(f"[LLMM] {ns} Raw event: {event} | Keys: {keys}")
             else:
                 print(f"[LLMM] {ns} Raw event: {event} | Non-dict payload")
 
-            # Full JSON dump (safe fallback for non-serializable)
             try:
                 payload = json.dumps(data, indent=2, sort_keys=True)
             except Exception:
                 payload = str(data)
             print(payload)
 
-            # Recursive scan for odds-like objects
             def find_odds(obj, path="root"):
                 found = []
                 if isinstance(obj, dict):
-                    # direct match
-                    cid = obj.get("conditionId") or obj.get("condition_id") or obj.get("id")
-                    prices = obj.get("prices") or obj.get("price") or obj.get("odds") or obj.get("pricesFormatted")
+                    cid = (obj.get("conditionId") or obj.get("condition_id") or obj.get("marketAddress")
+                           or obj.get("address") or obj.get("id") or obj.get("market"))
+                    prices = (obj.get("prices") or obj.get("price") or obj.get("odds")
+                              or obj.get("pricesFormatted") or obj.get("bestPrices") or obj.get("outcomesPrices"))
                     if cid and prices:
                         found.append((path, cid, prices, obj))
-                    # descend into children
+                    # outcomes array with price objects
+                    if isinstance(obj.get("outcomes"), list):
+                        for i, out in enumerate(obj["outcomes"]):
+                            if isinstance(out, dict):
+                                out_cid = out.get("conditionId") or out.get("id") or out.get("label")
+                                out_prices = out.get("prices") or out.get("price") or out.get("odds")
+                                if out_cid and out_prices:
+                                    found.append((f"{path}.outcomes[{i}]", out_cid, out_prices, out))
                     for k, v in obj.items():
                         new_path = f"{path}.{k}"
                         found.extend(find_odds(v, new_path))
@@ -140,20 +161,17 @@ class CustomWebSocket:
                 return found
 
             matches = find_odds(data)
-            # also check common top-level "markets" list if not already matched
             if isinstance(data, dict) and "markets" in data and not matches:
                 matches.extend(find_odds(data["markets"], path="root.markets"))
 
             for path, cid, prices, raw in matches:
-                # normalize prices list if possible
                 yes, no = ("?", "?")
                 if isinstance(prices, list) and len(prices) >= 2:
                     yes, no = prices[0], prices[1]
                 elif isinstance(prices, (str, int, float)):
                     yes = prices
-                title = self.market_titles.get(cid, cid[:6] + "…") if isinstance(cid, str) else str(cid)
+                title = self.market_titles.get(cid, (cid[:6] + "…") if isinstance(cid, str) else str(cid))
                 print(f"[LLMM] 🔎 Detected odds at {ns}:{event}:{path} → {title} | YES={yes} | NO={no}")
-                # print raw snippet for operator clarity (compact)
                 try:
                     snippet = json.dumps(raw, indent=2, sort_keys=True)
                 except Exception:
@@ -170,23 +188,24 @@ class CustomWebSocket:
         vol = None
 
         if isinstance(data, dict):
-            cid = data.get("conditionId")
-            prices = data.get("prices", [])
+            cid = data.get("conditionId") or data.get("condition_id") or data.get("marketAddress") or data.get("id")
+            prices = data.get("prices") or data.get("price") or data.get("odds")
             vol = data.get("volumeFormatted") or data.get("volume")
 
-            # handle nested market object
             if not cid and "markets" in data and isinstance(data["markets"], list) and data["markets"]:
                 m0 = data["markets"][0]
                 if isinstance(m0, dict):
-                    cid = m0.get("conditionId") or cid
-                    prices = m0.get("prices", prices)
+                    cid = m0.get("conditionId") or m0.get("id") or cid
+                    prices = m0.get("prices") or m0.get("price") or prices
                     vol = m0.get("volumeFormatted") or m0.get("volume") or vol
 
         yes, no = ("?", "?")
-        if isinstance(prices, list) and len(prices) == 2:
-            yes, no = prices
+        if isinstance(prices, list) and len(prices) >= 2:
+            yes, no = prices[0], prices[1]
+        elif isinstance(prices, (str, int, float)):
+            yes = prices
 
-        title = self.market_titles.get(cid, cid[:6] + "…") if cid else "Unknown"
+        title = self.market_titles.get(cid, (cid[:6] + "…") if isinstance(cid, str) else "Unknown")
         print(f"[LLMM] {title} → YES={yes} | NO={no} | Vol={vol}")
 
     async def connect(self, timeout=10, retries=3, retry_delay=3):
@@ -194,7 +213,6 @@ class CustomWebSocket:
         print(f"🔌 Connecting to {self.websocket_url}... (timeout={timeout}s, retries={retries})")
         connect_options = {"transports": ["websocket"]}
 
-        # include Origin and UA; include cookie if available
         headers = {
             "Origin": "https://limitless.exchange",
             "User-Agent": "LLMM/1.0"
@@ -226,37 +244,51 @@ class CustomWebSocket:
         raise ConnectionError(f"Failed to connect to {self.websocket_url} after {retries} attempts")
 
     async def subscribe_markets(self, condition_ids):
-        """Subscribe to markets — emit only marketAddresses by default to avoid server confusion"""
+        """Subscribe to markets — emit marketAddresses and a set of common fallback subscribe events"""
         if not self.connected:
             print("❌ Not connected")
             return
 
-        condition_ids = list(dict.fromkeys(condition_ids))  # deduplicate
-
+        condition_ids = list(dict.fromkeys(condition_ids))
         payload_addresses = {"marketAddresses": condition_ids}
+        payload_conditions = {"conditionIds": condition_ids}
+        payload_simple = {"markets": condition_ids}
 
         print(f"[LLMM] Emitting subscribe_market_prices with payload: {payload_addresses}")
         await self.sio.emit("subscribe_market_prices", payload_addresses, namespace="/markets")
 
-        # Uncomment the next block only if you confirm the server needs 'conditionIds'
-        # payload_conditions = {"conditionIds": condition_ids}
-        # print(f"[LLMM] Emitting (fallback) subscribe_market_prices with payload: {payload_conditions}")
-        # await self.sio.emit("subscribe_market_prices", payload_conditions, namespace="/markets")
+        # Emit safe fallbacks (server will ignore unknown events)
+        fallbacks = [
+            ("subscribe_markets", payload_addresses),
+            ("subscribe", payload_addresses),
+            ("subscribePrices", payload_addresses),
+            ("subscribe_market", payload_addresses),
+            ("subscribe_market_prices_v2", payload_addresses),
+            ("subscribe_market_prices", payload_conditions),
+            ("subscribe_market_prices", payload_simple),
+        ]
+        for ev, payload in fallbacks:
+            try:
+                await self.sio.emit(ev, payload, namespace="/markets")
+                print(f"[LLMM] Emitted fallback subscribe event: {ev}")
+            except Exception as e:
+                print(f"[LLMM] Fallback emit {ev} failed: {e}")
 
         if self.session_cookie:
-            await self.sio.emit("subscribe_positions", payload_addresses, namespace="/markets")
+            try:
+                await self.sio.emit("subscribe_positions", payload_addresses, namespace="/markets")
+            except Exception:
+                pass
 
-        print(f"[LLMM] Subscribed to {len(condition_ids)} markets")
+        print(f"[LLMM] Subscribed to {len(condition_ids)} markets (attempted multiple names)")
         self.subscribed_markets = condition_ids
 
     async def unsubscribe_markets(self, condition_ids):
-        """Unsubscribe from markets"""
         payload = {"marketAddresses": condition_ids}
         await self.sio.emit("unsubscribe_market_prices", payload, namespace="/markets")
         if self.session_cookie:
             await self.sio.emit("unsubscribe_positions", payload, namespace="/markets")
         print(f"[LLMM] Unsubscribed {len(condition_ids)} markets")
-
         self.subscribed_markets = [cid for cid in self.subscribed_markets if cid not in condition_ids]
 
     async def _resubscribe(self):
@@ -264,13 +296,11 @@ class CustomWebSocket:
             await self.subscribe_markets(self.subscribed_markets)
 
     async def refresh_from_file(self, filename="hourly_markets.json", interval=300):
-        """Reload scanner output and sync subscriptions"""
         while True:
             try:
                 if os.path.exists(filename):
                     with open(filename) as f:
                         data = json.load(f)
-
                     if isinstance(data, dict):
                         new_ids = list(data.keys())
                         self.market_titles.update(data)
@@ -280,7 +310,6 @@ class CustomWebSocket:
                     new_ids = list(dict.fromkeys(new_ids))
                     current_set = set(self.subscribed_markets)
                     new_set = set(new_ids)
-
                     to_add = list(new_set - current_set)
                     to_remove = list(current_set - new_set)
 
@@ -295,30 +324,24 @@ class CustomWebSocket:
 
                     ts = datetime.now().strftime("%H:%M %Z")
                     print(f"[LLMM] Heartbeat {ts} → {len(self.subscribed_markets)} markets active, still listening…")
-
                 else:
                     print("[LLMM] No hourly_markets.json found")
-
             except Exception as e:
                 print(f"[LLMM] Refresh error: {e}")
-
             await asyncio.sleep(interval)
 
     async def periodic_probe(self, interval=60):
-        """Periodically request snapshots/pings; include server-tolerant payloads and swallow harmless server errors"""
         while True:
             try:
                 if not self.subscribed_markets:
                     await asyncio.sleep(interval)
                     continue
 
-                # Include only accepted keys (marketAddresses) and safe extras
                 payload = {
                     "marketAddresses": self.subscribed_markets,
-                    "marketSlugs": []  # harmless if unused
+                    "marketSlugs": []
                 }
 
-                # Try a list of common probe event names; server will respond or error
                 for ev in ("request_market_snapshot", "ping_prices", "requestPrices"):
                     try:
                         await self.sio.emit(ev, payload, namespace="/markets")
@@ -331,7 +354,6 @@ class CustomWebSocket:
             await asyncio.sleep(interval)
 
     async def monitor_silence(self, warn_after=300):
-        """Warn if we haven't seen non-system events for too long"""
         while True:
             if self.last_non_system_event_ts is None:
                 print("[LLMM] Silence monitor: no non-system events observed yet")
@@ -345,7 +367,6 @@ class CustomWebSocket:
         await self.sio.wait()
 
     async def close(self):
-        """Clean disconnect"""
         try:
             await self.sio.disconnect()
             print("🔌 Disconnected cleanly")

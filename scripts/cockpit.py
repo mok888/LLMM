@@ -1,11 +1,9 @@
 #!/usr/bin/env python3
 """
 Limitless Exchange Cockpit
-- Connects to WebSocket client
-- Loads hourly_markets.json and subscribes
+- Loads hourly_markets.json
+- Connects WebSocket client
 - Starts refresh, probe, and silence monitor tasks
-- Prints lifecycle + heartbeat banners
-- Clean shutdown via finally
 """
 
 import asyncio
@@ -15,7 +13,7 @@ import sys
 from datetime import datetime
 from custom_websocket import CustomWebSocket
 
-REFRESH_INTERVAL = 300  # seconds (5 minutes)
+REFRESH_INTERVAL = 300  # seconds
 
 async def main():
     private_key = os.getenv("PRIVATE_KEY")
@@ -23,19 +21,16 @@ async def main():
     print("Limitless Exchange Cockpit")
     print("=" * 50)
 
-    # CLI toggle: --verbose enables transport logs
     verbose = "--verbose" in sys.argv
     client = CustomWebSocket(private_key=private_key, verbose_logs=verbose)
 
     try:
         await client.connect()
 
-        # Load scanner output
         condition_ids = []
         if os.path.exists("hourly_markets.json"):
             with open("hourly_markets.json") as f:
                 data = json.load(f)
-
             if isinstance(data, dict):
                 condition_ids = list(data.keys())
                 client.market_titles.update(data)
@@ -50,14 +45,12 @@ async def main():
         ts = datetime.now().strftime("%H:%M %Z")
         print(f"[LLMM] Heartbeat {ts} → {len(client.subscribed_markets)} markets active, cockpit online…")
 
-        # Background tasks
         asyncio.create_task(client.refresh_from_file("hourly_markets.json", REFRESH_INTERVAL))
         asyncio.create_task(client.periodic_probe(60))
         asyncio.create_task(client.monitor_silence(300))
 
         print("📡 Listening for events... Press Ctrl+C to stop")
         await client.wait()
-
     finally:
         await client.close()
 
