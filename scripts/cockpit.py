@@ -1,9 +1,6 @@
 #!/usr/bin/env python3
 """
-Cockpit Script with Integrated Refresh
-- Connects to WebSocket
-- Loads hourly_markets.json
-- Periodically refreshes subscriptions
+Cockpit Script with Integrated Refresh + Deduplication
 """
 
 import asyncio
@@ -13,6 +10,16 @@ from websocket_client import LimitlessWebSocket
 
 REFRESH_INTERVAL = 300  # seconds (5 minutes)
 
+def deduplicate(addresses):
+    """Remove duplicates while preserving order"""
+    seen = set()
+    unique = []
+    for addr in addresses:
+        if addr and addr not in seen:
+            seen.add(addr)
+            unique.append(addr)
+    return unique
+
 async def refresh_markets(client):
     """Reload hourly_markets.json and resubscribe periodically"""
     while True:
@@ -21,8 +28,11 @@ async def refresh_markets(client):
                 with open("hourly_markets.json") as f:
                     market_addresses = json.load(f)
 
+                # Deduplicate before subscribing
+                market_addresses = deduplicate(market_addresses)
+
                 if market_addresses:
-                    print(f"[LLMM] Refreshing subscriptions → {len(market_addresses)} markets")
+                    print(f"[LLMM] Refreshing subscriptions → {len(market_addresses)} unique markets")
                     await client.subscribe_markets(market_addresses)
                 else:
                     print("[LLMM] Refresh file found but empty")
@@ -47,6 +57,7 @@ async def main():
     if os.path.exists("hourly_markets.json"):
         with open("hourly_markets.json") as f:
             market_addresses = json.load(f)
+        market_addresses = deduplicate(market_addresses)
         if market_addresses:
             await client.subscribe_markets(market_addresses)
         else:
