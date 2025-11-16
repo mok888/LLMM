@@ -1,12 +1,10 @@
 #!/usr/bin/env python3
 """
 Custom Cockpit WebSocket Client
-- Deduplication
-- Refresh + Unsubscribe
-- Formatted price banners
-- Title lookup from scanner payload
-- Catch-all logger
+- Connects to Limitless Exchange
+- Handles subscriptions, odds updates, and lifecycle banners
 - Heartbeat with timestamp
+- Catch-all logger dumps full JSON payloads
 """
 
 import asyncio
@@ -72,13 +70,14 @@ class CustomWebSocket:
         async def exception(data):
             print(f"[LLMM] Exception: {json.dumps(data)}")
 
-        # Catch-all logger
+        # Catch-all logger: dump full JSON payload
         @self.sio.on("*", namespace="/markets")
         async def catch_all(event, data):
             try:
-                print(f"[LLMM] Raw event: {event} → {json.dumps(data)}")
-            except Exception:
-                print(f"[LLMM] Raw event: {event} → {data}")
+                payload = json.dumps(data, indent=2, sort_keys=True)
+                print(f"[LLMM] Raw event: {event}\n{payload}")
+            except Exception as e:
+                print(f"[LLMM] Raw event: {event} (unserializable) → {data} | Error: {e}")
 
     async def connect(self):
         print(f"🔌 Connecting to {self.websocket_url}...")
@@ -98,8 +97,7 @@ class CustomWebSocket:
             print("❌ Not connected")
             return
 
-        # Deduplicate
-        condition_ids = list(dict.fromkeys(condition_ids))
+        condition_ids = list(dict.fromkeys(condition_ids))  # deduplicate
         payload = {"marketAddresses": condition_ids}
         await self.sio.emit("subscribe_market_prices", payload, namespace="/markets")
         print(f"[LLMM] Subscribed to {len(condition_ids)} markets")
@@ -107,64 +105,4 @@ class CustomWebSocket:
         if self.session_cookie:
             await self.sio.emit("subscribe_positions", payload, namespace="/markets")
 
-        self.subscribed_markets = condition_ids
-
-    async def unsubscribe_markets(self, condition_ids):
-        """Unsubscribe from markets"""
-        payload = {"marketAddresses": condition_ids}
-        await self.sio.emit("unsubscribe_market_prices", payload, namespace="/markets")
-        if self.session_cookie:
-            await self.sio.emit("unsubscribe_positions", payload, namespace="/markets")
-        print(f"[LLMM] Unsubscribed {len(condition_ids)} markets")
-
-        self.subscribed_markets = [cid for cid in self.subscribed_markets if cid not in condition_ids]
-
-    async def _resubscribe(self):
-        if self.subscribed_markets:
-            await self.subscribe_markets(self.subscribed_markets)
-
-    async def refresh_from_file(self, filename="hourly_markets.json", interval=300):
-        """Reload scanner output and sync subscriptions"""
-        while True:
-            try:
-                if os.path.exists(filename):
-                    with open(filename) as f:
-                        data = json.load(f)
-
-                    # Expect dict: {conditionId: title}
-                    if isinstance(data, dict):
-                        new_ids = list(data.keys())
-                        self.market_titles.update(data)
-                    else:
-                        new_ids = data
-
-                    new_ids = list(dict.fromkeys(new_ids))
-                    current_set = set(self.subscribed_markets)
-                    new_set = set(new_ids)
-
-                    to_add = list(new_set - current_set)
-                    to_remove = list(current_set - new_set)
-
-                    if to_add:
-                        print(f"[LLMM] Adding {len(to_add)} markets")
-                        await self.subscribe_markets(to_add)
-                    if to_remove:
-                        print(f"[LLMM] Removing {len(to_remove)} markets")
-                        await self.unsubscribe_markets(to_remove)
-                    if not to_add and not to_remove:
-                        print(f"[LLMM] Subscriptions already up-to-date ({len(new_ids)} markets)")
-
-                    # Heartbeat banner with timestamp
-                    ts = datetime.now().strftime("%H:%M %Z")
-                    print(f"[LLMM] Heartbeat {ts} → {len(self.subscribed_markets)} markets active, still listening…")
-
-                else:
-                    print("[LLMM] No hourly_markets.json found")
-
-            except Exception as e:
-                print(f"[LLMM] Refresh error: {e}")
-
-            await asyncio.sleep(interval)
-
-    async def wait(self):
-        await self.sio.wait()
+        self.subscribed
