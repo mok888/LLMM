@@ -4,6 +4,7 @@ import datetime
 import requests
 import websockets
 import time
+import argparse
 
 API_URL = "https://api.limitless.exchange"
 
@@ -55,6 +56,7 @@ def test_rest_hourly(slug, label):
             print("Body sample:", r.text[:200], "...")
     except Exception as e:
         print("[LLMM] REST ERROR:", e)
+
 async def test_ws(market_id):
     """Subscribe to WS feed for a given market id."""
     uri = f"{API_URL}/api-v1/ws".replace("https", "wss")
@@ -74,3 +76,38 @@ async def test_ws(market_id):
                 print("[LLMM] WS EVENT:", msg)
     except Exception as e:
         print("[LLMM] WS ERROR:", e)
+
+async def hourly_scanner(slug, market_id, fast_forward=False):
+    """Run probes at HH:59:55 and HH:00:15 (or fast-forward for testing)."""
+    while True:
+        if fast_forward:
+            before = datetime.datetime.now() + datetime.timedelta(seconds=10)
+            after = datetime.datetime.now() + datetime.timedelta(seconds=20)
+        else:
+            now = datetime.datetime.now()
+            next_hour = (now.replace(minute=0, second=0, microsecond=0)
+                         + datetime.timedelta(hours=1))
+            before = next_hour - datetime.timedelta(seconds=5)
+            after = next_hour + datetime.timedelta(seconds=15)
+
+        await asyncio.sleep((before - datetime.datetime.now()).total_seconds())
+        test_rest_hourly(slug, "PREVIOUS HOUR END")
+
+        await asyncio.sleep((after - datetime.datetime.now()).total_seconds())
+        test_rest_hourly(slug, "NEXT HOUR START")
+        await test_ws(market_id)
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--test", action="store_true", help="Run in fast-forward mode")
+    args = parser.parse_args()
+
+    print("[LLMM] Starting Hourly market scanner...")
+    slug, market_id = discover_hourly_market(limit=10)
+    if slug and market_id:
+        asyncio.run(hourly_scanner(slug, market_id, fast_forward=args.test))
+    else:
+        print("[LLMM] No Hourly market available to scan.")
+
+if __name__ == "__main__":
+    main()
