@@ -2,13 +2,14 @@
 """
 Custom Cockpit WebSocket Client
 - Connects to Limitless Exchange
-- Subscriptions with dual-key payloads (marketAddresses + conditionIds)
+- Subscriptions with marketAddresses payload (fallback commented)
 - Formatted price banners for multiple event names
-- Catch-all logs full JSON, top-level keys, and highlights odds if present
+- Catch-all logs top-level keys, full JSON, and highlights odds if present
 - Root namespace fallbacks to capture emissions on "/"
 - Heartbeat with timestamp
-- Periodic probe to request snapshots/pings
+- Periodic probe to request snapshots/pings (server-tolerant)
 - Silence monitor warns if no non-system events arrive
+- Clean disconnect
 """
 
 import asyncio
@@ -113,13 +114,23 @@ class CustomWebSocket:
                 print(f"[LLMM] {ns} Raw event: {event} | Non-dict payload")
 
             # Full JSON dump
-            payload = json.dumps(data, indent=2, sort_keys=True)
+            try:
+                payload = json.dumps(data, indent=2, sort_keys=True)
+            except Exception:
+                payload = str(data)
             print(payload)
 
             # Highlight odds if present at top-level
             if isinstance(data, dict):
                 cid = data.get("conditionId")
                 prices = data.get("prices")
+                # also check common nesting patterns
+                if not cid and "markets" in data and isinstance(data["markets"], list) and data["markets"]:
+                    m0 = data["markets"][0]
+                    if isinstance(m0, dict):
+                        cid = m0.get("conditionId") or cid
+                        prices = m0.get("prices") or prices
+
                 if cid and prices:
                     yes, no = ("?", "?")
                     if isinstance(prices, list) and len(prices) == 2:
@@ -139,6 +150,14 @@ class CustomWebSocket:
             cid = data.get("conditionId")
             prices = data.get("prices", [])
             vol = data.get("volumeFormatted") or data.get("volume")
+
+            # handle nested market object
+            if not cid and "markets" in data and isinstance(data["markets"], list) and data["markets"]:
+                m0 = data["markets"][0]
+                if isinstance(m0, dict):
+                    cid = m0.get("conditionId") or cid
+                    prices = m0.get("prices", prices)
+                    vol = m0.get("volumeFormatted") or m0.get("volume") or vol
 
         yes, no = ("?", "?")
         if isinstance(prices, list) and len(prices) == 2:
@@ -160,7 +179,7 @@ class CustomWebSocket:
             print("❌ Connection failed")
 
     async def subscribe_markets(self, condition_ids):
-        """Subscribe to markets (try both payload keys to avoid silent streams)"""
+        """Subscribe to markets — emit only marketAddresses by default to avoid server confusion"""
         if not self.connected:
             print("❌ Not connected")
             return
@@ -168,14 +187,14 @@ class CustomWebSocket:
         condition_ids = list(dict.fromkeys(condition_ids))  # deduplicate
 
         payload_addresses = {"marketAddresses": condition_ids}
-        payload_conditions = {"conditionIds": condition_ids}
 
         print(f"[LLMM] Emitting subscribe_market_prices with payload: {payload_addresses}")
         await self.sio.emit("subscribe_market_prices", payload_addresses, namespace="/markets")
 
-        # Fallback emit in case the server expects 'conditionIds'
-        print(f"[LLMM] Emitting (fallback) subscribe_market_prices with payload: {payload_conditions}")
-        await self.sio.emit("subscribe_market_prices", payload_conditions, namespace="/markets")
+        # Uncomment the next block only if you confirm the server needs 'conditionIds'
+        # payload_conditions = {"conditionIds": condition_ids}
+        # print(f"[LLMM] Emitting (fallback) subscribe_market_prices with payload: {payload_conditions}")
+        # await self.sio.emit("subscribe_market_prices", payload_conditions, namespace="/markets")
 
         if self.session_cookie:
             await self.sio.emit("subscribe_positions", payload_addresses, namespace="/markets")
@@ -239,34 +258,4 @@ class CustomWebSocket:
             await asyncio.sleep(interval)
 
     async def periodic_probe(self, interval=60):
-        """Periodically request snapshots/pings to surface any odds packets"""
-        while True:
-            try:
-                await self.sio.emit("request_market_snapshot", {"marketAddresses": self.subscribed_markets}, namespace="/markets")
-                await self.sio.emit("ping_prices", {"marketAddresses": self.subscribed_markets}, namespace="/markets")
-                print(f"[LLMM] Probe → requested snapshot/ping for {len(self.subscribed_markets)} markets")
-            except Exception as e:
-                print(f"[LLMM] Probe error: {e}")
-            await asyncio.sleep(interval)
-
-    async def monitor_silence(self, warn_after=300):
-        """Warn if we haven't seen non-system events for too long"""
-        while True:
-            if self.last_non_system_event_ts is None:
-                print("[LLMM] Silence monitor: no non-system events observed yet")
-            else:
-                delta = time() - self.last_non_system_event_ts
-                if delta > warn_after:
-                    print(f"[LLMM] Warning: {int(delta)}s without non-system events")
-            await asyncio.sleep(30)
-
-    async def wait(self):
-        await self.sio.wait()
-
-    async def close(self):
-        """Clean disconnect"""
-        try:
-            await self.sio.disconnect()
-            print("🔌 Disconnected cleanly")
-        except Exception as e:
-            print(f"⚠️ Error during disconnect: {e}")
+        """Periodically request snapshots/pings

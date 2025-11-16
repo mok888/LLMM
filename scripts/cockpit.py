@@ -11,6 +11,7 @@ Limitless Exchange Cockpit
 import asyncio
 import json
 import os
+import sys
 from datetime import datetime
 from custom_websocket import CustomWebSocket
 
@@ -22,8 +23,9 @@ async def main():
     print("Limitless Exchange Cockpit")
     print("=" * 50)
 
-    # verbose_logs=True enables transport logs; set to False once mapped
-    client = CustomWebSocket(private_key=private_key, verbose_logs=True)
+    # CLI toggle: --verbose enables transport logs
+    verbose = "--verbose" in sys.argv
+    client = CustomWebSocket(private_key=private_key, verbose_logs=verbose)
 
     try:
         await client.connect()
