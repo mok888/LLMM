@@ -55,7 +55,6 @@ def test_rest_hourly(slug, label):
             print("Body sample:", r.text[:200], "...")
     except Exception as e:
         print("[LLMM] REST ERROR:", e)
-
 async def test_ws(market_id):
     """Subscribe to WS feed for a given market id."""
     uri = f"{API_URL}/api-v1/ws".replace("https", "wss")
@@ -72,4 +71,6 @@ async def test_ws(market_id):
             print(f"[LLMM] Subscribed to market id={market_id}")
             for _ in range(5):
                 msg = await ws.recv()
-                print("[LLMM] WS
+                print("[LLMM] WS EVENT:", msg)
+    except Exception as e:
+        print("[LLMM] WS ERROR:", e)
