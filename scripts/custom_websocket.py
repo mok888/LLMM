@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 """
-Custom Cockpit WebSocket Client - cleaned subscription logic
+Custom Cockpit WebSocket Client - canonical subscribe with ack
 
-Key changes:
-- Use a single canonical subscribe payload: {"marketAddresses": [...]}
-- Avoid re-emitting the same event name with a different payload shape
-- Keep safe fallback event names (different names only)
-- Explicitly log server "error" events with the offending payload context
-- Probe events use the canonical payload
+Features:
+- Connects to Limitless WebSocket (socket.io)
+- Uses canonical {"marketAddresses": [...]} subscribe payload and waits for server ack
+- Avoids emitting the same event name with different payload shapes
+- Safe fallback event names (different names only) emitted with ack observation
+- Catch-all recursive JSON scanner that finds odds-like objects
+- Periodic probe, file-based refresh of market list, silence monitor, clean disconnect
 """
 
 import asyncio
@@ -34,7 +35,8 @@ class CustomWebSocket:
         self._setup_handlers()
 
     def _setup_handlers(self):
-        # /markets namespace handlers
+        """Register handlers for /markets and fallbacks"""
+
         @self.sio.event(namespace="/markets")
         async def connect():
             self.connected = True
@@ -56,10 +58,9 @@ class CustomWebSocket:
 
         @self.sio.event(namespace="/markets")
         async def error(data):
-            # Print the server error payload clearly
             print(f"[LLMM] Server error on /markets: {json.dumps(data)}")
 
-        # Known direct price events
+        # Common direct price events
         @self.sio.event(namespace="/markets")
         async def newPriceData(data):
             await self._print_price_banner(data)
@@ -72,7 +73,15 @@ class CustomWebSocket:
         async def priceUpdate(data):
             await self._print_price_banner(data)
 
-        # Generic and catch-all handlers (keeps recursive scanner active)
+        @self.sio.event(namespace="/markets")
+        async def prices(data):
+            await self._print_price_banner(data)
+
+        @self.sio.event(namespace="/markets")
+        async def market_update(data):
+            await self._print_price_banner(data)
+
+        # Generic and catch-all handlers
         @self.sio.event(namespace="/markets")
         async def data(data):
             await self._maybe_highlight_and_dump("data", data, ns="/markets")
@@ -98,7 +107,7 @@ class CustomWebSocket:
         async def catch_all_root(event, data):
             await self._maybe_highlight_and_dump(event, data, ns="/")
 
-        # Some providers expose /prices namespace — keep a fallback
+        # /prices fallback
         try:
             @self.sio.on("*", namespace="/prices")
             async def catch_all_prices(event, data):
@@ -107,6 +116,7 @@ class CustomWebSocket:
             pass
 
     async def _maybe_highlight_and_dump(self, event, data, ns):
+        """Print event keys, full JSON, and recursively find odds-like objects"""
         try:
             if event != "system":
                 self.last_non_system_event_ts = time()
@@ -170,6 +180,7 @@ class CustomWebSocket:
             print(f"[LLMM] {ns} Raw event: {event} (unserializable) → {data} | Error: {e}")
 
     async def _print_price_banner(self, data):
+        """Compact banner for price payloads"""
         cid = None
         prices = None
         vol = None
@@ -195,8 +206,10 @@ class CustomWebSocket:
         print(f"[LLMM] {title} → YES={yes} | NO={no} | Vol={vol}")
 
     async def connect(self, timeout=10, retries=3, retry_delay=3):
+        """Connect with explicit headers, timeout and retries"""
         print(f"🔌 Connecting to {self.websocket_url}... (timeout={timeout}s, retries={retries})")
         connect_options = {"transports": ["websocket"]}
+
         headers = {"Origin": "https://limitless.exchange", "User-Agent": "LLMM/1.0"}
         if self.session_cookie:
             headers["Cookie"] = f"limitless_session={self.session_cookie}"
@@ -224,41 +237,59 @@ class CustomWebSocket:
 
         raise ConnectionError(f"Failed to connect to {self.websocket_url} after {retries} attempts")
 
+    async def _emit_with_ack(self, event, payload, namespace="/markets", timeout=5):
+        """Emit using call() to get an ack/response or timeout exception."""
+        try:
+            resp = await self.sio.call(event, payload, namespace=namespace, timeout=timeout)
+            print(f"[LLMM] Ack for {event}: {resp}")
+            return resp
+        except Exception as e:
+            print(f"[LLMM] No ack/err for {event}: {type(e).__name__}: {e}")
+            return None
+
     async def subscribe_markets(self, condition_ids):
+        """Subscribe to markets using canonical payload and await ack.
+
+        - Emit only once with marketAddresses to avoid conflicting payload shapes.
+        - Observe ack; if server indicates error, it will be printed.
+        - Optionally emit safe fallback event names (different names only).
+        """
         if not self.connected:
             print("❌ Not connected")
             return
 
         condition_ids = list(dict.fromkeys(condition_ids))
-        payload_addresses = {"marketAddresses": condition_ids}
-        payload_simple = {"markets": condition_ids}
+        payload = {"marketAddresses": condition_ids}
 
-        # Primary canonical subscribe emit (only once, with marketAddresses)
-        print(f"[LLMM] Emitting subscribe_market_prices with payload: {payload_addresses}")
-        await self.sio.emit("subscribe_market_prices", payload_addresses, namespace="/markets")
+        print(f"[LLMM] Emitting canonical subscribe_market_prices with payload: {payload}")
+        ack = await self._emit_with_ack("subscribe_market_prices", payload, namespace="/markets", timeout=6)
 
-        # Safe fallbacks: different event names only (do NOT re-emit the same event name with different payload keys)
+        if isinstance(ack, dict):
+            # best-effort check for success
+            if ack.get("markets") or (ack.get("message") and "success" in ack.get("message", "").lower()):
+                print(f"[LLMM] Server ack indicates subscription success: {ack}")
+            else:
+                print(f"[LLMM] Server ack (non-error) received: {ack}")
+        elif ack is None:
+            print("[LLMM] No ack received for canonical subscribe — server may still accept via system message")
+
+        # Safe fallbacks: different event names only (do NOT re-emit the same event name with different keys)
         fallbacks = [
-            ("subscribe_markets", payload_addresses),
-            ("subscribe", payload_addresses),
-            ("subscribePrices", payload_addresses),
+            ("subscribe_markets", payload),
+            ("subscribe", payload),
+            ("subscribePrices", payload),
         ]
-        for ev, payload in fallbacks:
-            try:
-                await self.sio.emit(ev, payload, namespace="/markets")
-                print(f"[LLMM] Emitted fallback subscribe event: {ev}")
-            except Exception as e:
-                print(f"[LLMM] Fallback emit {ev} failed: {e}")
+        for ev, p in fallbacks:
+            resp = await self._emit_with_ack(ev, p, namespace="/markets", timeout=3)
+            if resp:
+                print(f"[LLMM] Fallback {ev} ack: {resp}")
 
-        # positions subscribe (if authenticated)
+        # Subscribe positions if authenticated
         if self.session_cookie:
-            try:
-                await self.sio.emit("subscribe_positions", payload_addresses, namespace="/markets")
-            except Exception:
-                pass
+            await self._emit_with_ack("subscribe_positions", payload, namespace="/markets", timeout=5)
 
-        print(f"[LLMM] Subscribed to {len(condition_ids)} markets (canonical only)")
         self.subscribed_markets = condition_ids
+        print(f"[LLMM] Subscribed to {len(condition_ids)} markets (canonical emit + optional fallbacks)")
 
     async def unsubscribe_markets(self, condition_ids):
         payload = {"marketAddresses": condition_ids}
