@@ -4,30 +4,44 @@ import datetime
 import requests
 import websockets
 
-API_URL = "https://api.limitless.exchange"
+GRAPHQL_URL = "https://api.limitless.exchange/graphql"
+REST_URL = "https://api.limitless.exchange/api-v1"
 
-def discover_hourly_market(page=1, limit=10):
-    """Discover newest Hourly market and return slug + id."""
-    url = f"{API_URL}/markets/active/{page}"
-    params = {"page": str(page), "limit": str(limit), "sortBy": "newest"}
-    print(f"[LLMM] Discovering Hourly markets: {url} {params}")
-    r = requests.get(url, params=params, timeout=5)
-    data = r.json()
-    markets = data.get("data", [])
-    hourly_markets = [m for m in markets if "Hourly" in m.get("categories", [])]
-    if not hourly_markets:
-        print("[LLMM] No Hourly markets found.")
+def discover_hourly_market(limit=5):
+    """Discover newest Hourly markets via GraphQL and return slug + id."""
+    query = """
+    {
+      markets(page:1, limit:%d, sortBy:"newest", categories:["Hourly"]) {
+        id
+        slug
+        title
+        categories
+      }
+    }
+    """ % limit
+
+    print("[LLMM] Discovering Hourly markets via GraphQL...")
+    try:
+        r = requests.post(GRAPHQL_URL, json={"query": query}, timeout=15)
+        r.raise_for_status()
+        data = r.json()
+        markets = data.get("data", {}).get("markets", [])
+        if not markets:
+            print("[LLMM] No Hourly markets found.")
+            return None, None
+        m = markets[0]
+        print(f"[LLMM] Selected Hourly market slug={m['slug']} id={m['id']} title={m['title']}")
+        return m["slug"], m["id"]
+    except Exception as e:
+        print("[LLMM] GraphQL discovery ERROR:", e)
         return None, None
-    m = hourly_markets[0]
-    print(f"[LLMM] Selected Hourly market slug={m['slug']} id={m['id']} title={m['title']}")
-    return m["slug"], m["id"]
 
 def test_rest_hourly(slug, label):
     """Probe REST hourly endpoint for a given slug."""
-    url = f"{API_URL}/api-v1/markets/{slug}/hourly"
+    url = f"{REST_URL}/markets/{slug}/hourly"
     print(f"[LLMM] {label} REST hourly probe: {url}")
     try:
-        r = requests.get(url, timeout=5)
+        r = requests.get(url, timeout=15)
         print("[LLMM] Status:", r.status_code)
         if r.status_code == 200:
             try:
@@ -44,7 +58,7 @@ def test_rest_hourly(slug, label):
 
 async def test_ws(market_id):
     """Subscribe to WS feed for a given market id."""
-    uri = f"{API_URL}/api-v1/ws".replace("https", "wss")
+    uri = f"{REST_URL}/ws".replace("https", "wss")
     print(f"[LLMM] Testing WS: {uri}")
     try:
         async with websockets.connect(uri, ping_interval=None) as ws:
@@ -82,7 +96,7 @@ async def hourly_scanner(slug, market_id):
 
 def main():
     print("[LLMM] Starting Hourly market scanner...")
-    slug, market_id = discover_hourly_market(limit=10)
+    slug, market_id = discover_hourly_market(limit=5)
     if slug and market_id:
         asyncio.run(hourly_scanner(slug, market_id))
     else:
