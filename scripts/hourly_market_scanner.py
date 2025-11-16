@@ -4,25 +4,55 @@ import datetime
 import requests
 import websockets
 import argparse
+import time
 
 API_URL = "https://api.limitless.exchange"
 
-def test_rest_hourly(slug, label):
-    """Probe REST hourly endpoint for a given slug."""
-    url = f"{API_URL}/api-v1/markets/{slug}/hourly"
-    print(f"[LLMM] {label} REST hourly probe: {url}")
+def discover_hourly_market(page=1, limit=10, retries=3):
+    """Discover newest Hourly market via REST /markets/active/{categoryId}."""
+    category_id = 1  # Hourly category
+    url = f"{API_URL}/markets/active/{category_id}"
+    params = {"page": str(page), "limit": str(limit), "sortBy": "newest"}
+    print(f"[LLMM] Discovering Hourly markets: {url} {params}")
+    for attempt in range(retries):
+        try:
+            r = requests.get(url, params=params, timeout=15)
+            if r.status_code == 200:
+                data = r.json()
+                markets = data.get("data", [])
+                if not markets:
+                    print("[LLMM] No Hourly markets found.")
+                    return None, None
+                m = markets[0]
+                print(f"[LLMM] Selected Hourly market slug={m['slug']} id={m['id']} title={m['title']}")
+                return m["slug"], m["id"]
+            else:
+                print(f"[LLMM] Discovery failed: {r.status_code} {r.text}")
+        except requests.exceptions.ReadTimeout:
+            wait = 2 ** attempt
+            print(f"[LLMM] Timeout on attempt {attempt+1}, retrying in {wait}s...")
+            time.sleep(wait)
+        except Exception as e:
+            print("[LLMM] Discovery ERROR:", e)
+            time.sleep(2)
+    return None, None
+
+def test_rest_market(slug, label):
+    """Probe REST market endpoint for a given slug."""
+    url = f"{API_URL}/api-v1/markets/{slug}"
+    print(f"[LLMM] {label} REST market probe: {url}")
     try:
         r = requests.get(url, timeout=15)
         print("[LLMM] Status:", r.status_code)
         if r.status_code == 200:
             try:
                 data = r.json()
-                print("[LLMM] REST HOURLY OK")
+                print("[LLMM] REST MARKET OK")
                 print(json.dumps(data, indent=2)[:500], "...")
             except Exception:
                 print("[LLMM] Response not JSON, body sample:", r.text[:200], "...")
         else:
-            print("[LLMM] REST HOURLY FAIL")
+            print("[LLMM] REST MARKET FAIL")
             print("Body sample:", r.text[:200], "...")
     except Exception as e:
         print("[LLMM] REST ERROR:", e)
@@ -61,10 +91,10 @@ async def hourly_scanner(slug, market_id, fast_forward=False):
             after = next_hour + datetime.timedelta(seconds=15)
 
         await asyncio.sleep((before - datetime.datetime.now()).total_seconds())
-        test_rest_hourly(slug, "PREVIOUS HOUR END")
+        test_rest_market(slug, "PREVIOUS HOUR END")
 
         await asyncio.sleep((after - datetime.datetime.now()).total_seconds())
-        test_rest_hourly(slug, "NEXT HOUR START")
+        test_rest_market(slug, "NEXT HOUR START")
         await test_ws(market_id)
 
 def main():
@@ -73,11 +103,7 @@ def main():
     args = parser.parse_args()
 
     print("[LLMM] Starting Hourly market scanner...")
-
-    # 🔧 Directly specify a known active market
-    slug = "dollardoge-above-dollar021652-on-sep-1-1200-utc-1756724413009"
-    market_id = 7495
-
+    slug, market_id = discover_hourly_market(limit=10)
     if slug and market_id:
         asyncio.run(hourly_scanner(slug, market_id, fast_forward=args.test))
     else:
