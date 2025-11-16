@@ -11,7 +11,10 @@ def get_signing_message():
     url = f"{API_URL}/auth/signing-message"
     r = requests.get(url, timeout=15)
     r.raise_for_status()
-    message = r.json()
+    try:
+        message = r.json()
+    except ValueError:
+        message = r.text
     print("[LLMM] Signing message:", message)
     return message
 
@@ -45,7 +48,10 @@ def list_markets(session, page=1, limit=10):
     r = session.get(url, params=params, timeout=15)
     print("[LLMM] Markets status:", r.status_code)
     print("[LLMM] Response:", r.text[:500], "...")
-    return r.json()
+    try:
+        return r.json()
+    except ValueError:
+        return {"raw": r.text}
 
 def main():
     # Load environment variables from .env
@@ -66,8 +72,11 @@ def main():
 
     # Step 4: List markets
     markets = list_markets(session, page=1, limit=20)
-    for m in markets.get("data", []):
-        print(f"id={m['id']} slug={m['slug']} title={m['title']} categories={m.get('categories', [])}")
+    if "data" in markets:
+        for m in markets.get("data", []):
+            print(f"id={m['id']} slug={m['slug']} title={m['title']} categories={m.get('categories', [])}")
+    else:
+        print("[LLMM] Raw markets response:", markets)
 
 if __name__ == "__main__":
     main()
