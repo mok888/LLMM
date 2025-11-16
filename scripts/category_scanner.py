@@ -12,7 +12,6 @@ from limitless_auth import get_session
 
 API_URL = "https://api.limitless.exchange"
 
-# Map operator-friendly labels to backend category strings
 CATEGORY_MAP: Dict[str, str] = {
     "hourly": "Hourly",
     "daily": "Daily",
@@ -76,7 +75,12 @@ def continuous_scan(interval=180):
                 print(f"  [LLMM] NEW markets in {label}:")
                 for m in filtered:
                     if m['id'] in new_ids:
-                        print(f"    + {m['title']} | {m['ticker']} | Deadline {m['expirationDate']}")
+                        title = m.get("title") or m.get("slug") or "N/A"
+                        ticker = m.get("ticker") or "N/A"
+                        deadline = m.get("expirationDate") or "N/A"
+                        prices = m.get("prices") or []
+                        volume = m.get("volumeFormatted") or m.get("volume") or "N/A"
+                        print(f"    + {title} | Ticker {ticker} | Deadline {deadline} | Prices {prices} | Volume {volume}")
 
             if removed_ids:
                 print(f"  [LLMM] REMOVED markets in {label}:")
