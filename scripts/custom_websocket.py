@@ -189,17 +189,41 @@ class CustomWebSocket:
         title = self.market_titles.get(cid, cid[:6] + "…") if cid else "Unknown"
         print(f"[LLMM] {title} → YES={yes} | NO={no} | Vol={vol}")
 
-    async def connect(self):
-        print(f"🔌 Connecting to {self.websocket_url}...")
+    async def connect(self, timeout=10, retries=3, retry_delay=3):
+        """Connect with timeout, retries and explicit headers to satisfy the server upgrade"""
+        print(f"🔌 Connecting to {self.websocket_url}... (timeout={timeout}s, retries={retries})")
         connect_options = {"transports": ["websocket"]}
+
+        # include Origin and UA; include cookie if available
+        headers = {
+            "Origin": "https://limitless.exchange",
+            "User-Agent": "LLMM/1.0"
+        }
         if self.session_cookie:
-            connect_options["headers"] = {"Cookie": f"limitless_session={self.session_cookie}"}
-        await self.sio.connect(self.websocket_url, namespaces=["/markets"], **connect_options)
-        await asyncio.sleep(0.5)
-        if self.connected:
-            print("✅ Successfully connected")
-        else:
-            print("❌ Connection failed")
+            headers["Cookie"] = f"limitless_session={self.session_cookie}"
+        connect_options["headers"] = headers
+
+        attempt = 0
+        while attempt < retries:
+            attempt += 1
+            try:
+                coro = self.sio.connect(self.websocket_url, namespaces=["/markets"], **connect_options)
+                await asyncio.wait_for(coro, timeout=timeout)
+                await asyncio.sleep(0.5)
+                if self.connected:
+                    print("✅ Successfully connected")
+                    return
+                else:
+                    print(f"❌ Connect attempt {attempt} completed but 'connected' flag is False")
+            except asyncio.TimeoutError:
+                print(f"⏱️ Connect attempt {attempt} timed out after {timeout}s")
+            except Exception as e:
+                print(f"⚠️ Connect attempt {attempt} raised: {type(e).__name__}: {e}")
+            if attempt < retries:
+                print(f"↺ Retrying in {retry_delay}s...")
+                await asyncio.sleep(retry_delay)
+
+        raise ConnectionError(f"Failed to connect to {self.websocket_url} after {retries} attempts")
 
     async def subscribe_markets(self, condition_ids):
         """Subscribe to markets — emit only marketAddresses by default to avoid server confusion"""
