@@ -17,15 +17,20 @@ def get_active_slugs(session):
     try:
         data = r.json()
         print("[LLMM] Active market slugs with metadata:")
-        # Preview first few entries
-        for group in data.get("groups", []):
-            print(f"Group: {group['name']}")
+        # data is a list of groups
+        for group in data:
+            print(f"Group: {group.get('name')}")
             for m in group.get("markets", []):
-                print(f"  - Slug: {m['slug']} | Ticker: {m['ticker']} | Strike: {m['strikePrice']} | Deadline: {m['deadline']}")
+                print(
+                    f"  - Slug: {m.get('slug')} | "
+                    f"Ticker: {m.get('ticker')} | "
+                    f"Strike: {m.get('strikePrice')} | "
+                    f"Deadline: {m.get('deadline')}"
+                )
         return data
     except ValueError:
         print("[LLMM] Raw response:", r.text)
-        return {}
+        return []
 
 def main():
     session = get_session()
