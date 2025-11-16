@@ -63,6 +63,14 @@ class LimitlessWebSocket:
         async def exception(data):
             print(f"[LLMM] Exception: {json.dumps(data)}")
 
+        # Catch-all logger: prints every event + payload
+        @self.sio.on("*", namespace="/markets")
+        async def catch_all(event, data):
+            try:
+                print(f"[LLMM] Raw event: {event} → {json.dumps(data)}")
+            except Exception:
+                print(f"[LLMM] Raw event: {event} → {data}")
+
     async def connect(self):
         """Connect to WebSocket"""
         print(f"🔌 Connecting to {self.websocket_url}...")
