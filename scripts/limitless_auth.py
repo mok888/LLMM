@@ -29,9 +29,13 @@ def sign_message(message, private_key):
 def login(account, message, signature):
     """Step 3: Login with headers and body, store session cookie."""
     url = f"{API_URL}/auth/login"
+
+    # sanitize message for header (remove newlines)
+    header_message = " ".join(message.splitlines())
+
     headers = {
         "x-account": account,
-        "x-signing-message": message,
+        "x-signing-message": header_message,
         "x-signature": signature,
     }
     body = {"client": "eoa"}  # Example body
