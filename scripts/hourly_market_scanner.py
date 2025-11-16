@@ -3,39 +3,9 @@ import asyncio
 import datetime
 import requests
 import websockets
-import time
 import argparse
 
 API_URL = "https://api.limitless.exchange"
-
-def discover_hourly_market(page=1, limit=10, retries=3):
-    """Discover newest Hourly market via REST /markets/active."""
-    url = f"{API_URL}/markets/active"
-    params = {"page": str(page), "limit": str(limit), "sortBy": "newest"}
-    print(f"[LLMM] Discovering Hourly markets: {url} {params}")
-    for attempt in range(retries):
-        try:
-            r = requests.get(url, params=params, timeout=15)
-            if r.status_code == 200:
-                data = r.json()
-                markets = data.get("data", [])
-                hourly_markets = [m for m in markets if "Hourly" in m.get("categories", [])]
-                if not hourly_markets:
-                    print("[LLMM] No Hourly markets found.")
-                    return None, None
-                m = hourly_markets[0]
-                print(f"[LLMM] Selected Hourly market slug={m['slug']} id={m['id']} title={m['title']}")
-                return m["slug"], m["id"]
-            else:
-                print(f"[LLMM] Discovery failed: {r.status_code} {r.text}")
-        except requests.exceptions.ReadTimeout:
-            wait = 2 ** attempt
-            print(f"[LLMM] Timeout on attempt {attempt+1}, retrying in {wait}s...")
-            time.sleep(wait)
-        except Exception as e:
-            print("[LLMM] Discovery ERROR:", e)
-            time.sleep(2)
-    return None, None
 
 def test_rest_hourly(slug, label):
     """Probe REST hourly endpoint for a given slug."""
@@ -103,7 +73,11 @@ def main():
     args = parser.parse_args()
 
     print("[LLMM] Starting Hourly market scanner...")
-    slug, market_id = discover_hourly_market(limit=10)
+
+    # 🔧 Directly specify a known active market
+    slug = "dollardoge-above-dollar021652-on-sep-1-1200-utc-1756724413009"
+    market_id = 7495
+
     if slug and market_id:
         asyncio.run(hourly_scanner(slug, market_id, fast_forward=args.test))
     else:
