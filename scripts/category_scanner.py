@@ -2,7 +2,7 @@
 """
 Limitless Exchange Continuous Category Scanner
 - Fetches all active markets (paginated, limit=25, page=1,2,...)
-- Filters locally by categoryId using CATEGORY_MAP
+- Filters locally by category labels (e.g. "Weekly", "Economy")
 - Prints lifecycle banners for operator clarity
 """
 
@@ -12,18 +12,19 @@ from limitless_auth import get_session
 
 API_URL = "https://api.limitless.exchange"
 
-CATEGORY_MAP: Dict[str, int] = {
-    "hourly": 29,
-    "daily": 30,
-    "weekly": 31,
-    "30-min": 33,
-    "crypto": 2,
-    "economy": 23,
-    "company-news": 19,
-    "other": 5,
-    "chinese": 39,
-    "korean": 42,
-    "billions-network-tge": 43,
+# Map operator-friendly labels to backend category strings
+CATEGORY_MAP: Dict[str, str] = {
+    "hourly": "Hourly",
+    "daily": "Daily",
+    "weekly": "Weekly",
+    "30-min": "30-min",
+    "crypto": "Crypto",
+    "economy": "Economy",
+    "company-news": "Company-News",
+    "other": "Other",
+    "chinese": "Chinese",
+    "korean": "Korean",
+    "billions-network-tge": "Billions-Network-TGE",
 }
 
 def get_active_markets(session, limit=25, page=1):
@@ -53,7 +54,7 @@ def fetch_all_active(session):
     return all_markets
 
 def continuous_scan(interval=180):
-    """Continuously fetch all active markets and filter by category."""
+    """Continuously fetch all active markets and filter by category labels."""
     session = get_session()
     last_snapshot = {}
 
@@ -61,15 +62,15 @@ def continuous_scan(interval=180):
         all_markets = fetch_all_active(session)
         print(f"\n[LLMM] Total active markets: {len(all_markets)}")
 
-        for label, cat_id in CATEGORY_MAP.items():
-            filtered = [m for m in all_markets if str(m.get("categoryId")) == str(cat_id)]
+        for label, category in CATEGORY_MAP.items():
+            filtered = [m for m in all_markets if category in m.get("categories", [])]
             current_ids = {m['id'] for m in filtered}
-            prev_ids = last_snapshot.get(cat_id, set())
+            prev_ids = last_snapshot.get(category, set())
 
             new_ids = current_ids - prev_ids
             removed_ids = prev_ids - current_ids
 
-            print(f"[LLMM] Category {cat_id} ({label}) → {len(filtered)} markets")
+            print(f"[LLMM] Category {category} ({label}) → {len(filtered)} markets")
 
             if new_ids:
                 print(f"  [LLMM] NEW markets in {label}:")
@@ -82,7 +83,7 @@ def continuous_scan(interval=180):
                 for mid in removed_ids:
                     print(f"    - {mid}")
 
-            last_snapshot[cat_id] = current_ids
+            last_snapshot[category] = current_ids
 
         time.sleep(interval)
 
