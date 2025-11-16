@@ -4,6 +4,7 @@ Limitless Exchange Cockpit
 - Connects to WebSocket
 - Loads hourly_markets.json
 - Prints lifecycle + heartbeat banners
+- Clean shutdown (disconnect before closing loop)
 """
 
 import asyncio
@@ -21,32 +22,42 @@ async def main():
     print("=" * 50)
 
     client = CustomWebSocket(private_key=private_key)
-    await client.connect()
 
-    if os.path.exists("hourly_markets.json"):
-        with open("hourly_markets.json") as f:
-            data = json.load(f)
+    try:
+        await client.connect()
 
-        if isinstance(data, dict):
-            condition_ids = list(data.keys())
-            client.market_titles.update(data)
+        if os.path.exists("hourly_markets.json"):
+            with open("hourly_markets.json") as f:
+                data = json.load(f)
+
+            if isinstance(data, dict):
+                condition_ids = list(data.keys())
+                client.market_titles.update(data)
+            else:
+                condition_ids = data
+
+            if condition_ids:
+                await client.subscribe_markets(condition_ids)
+            else:
+                print("⚠️ No market addresses to subscribe")
         else:
-            condition_ids = data
+            print("⚠️ No hourly_markets.json found")
 
-        if condition_ids:
-            await client.subscribe_markets(condition_ids)
-        else:
-            print("⚠️ No market addresses to subscribe")
-    else:
-        print("⚠️ No hourly_markets.json found")
+        ts = datetime.now().strftime("%H:%M %Z")
+        print(f"[LLMM] Heartbeat {ts} → {len(client.subscribed_markets)} markets active, cockpit online…")
 
-    ts = datetime.now().strftime("%H:%M %Z")
-    print(f"[LLMM] Heartbeat {ts} → {len(client.subscribed_markets)} markets active, cockpit online…")
+        asyncio.create_task(client.refresh_from_file("hourly_markets.json", REFRESH_INTERVAL))
 
-    asyncio.create_task(client.refresh_from_file("hourly_markets.json", REFRESH_INTERVAL))
+        print("📡 Listening for events... Press Ctrl+C to stop")
+        await client.wait()
 
-    print("📡 Listening for events... Press Ctrl+C to stop")
-    await client.wait()
+    finally:
+        # ✅ Clean shutdown: disconnect before closing loop
+        try:
+            await client.sio.disconnect()
+            print("🔌 Disconnected cleanly")
+        except Exception as e:
+            print(f"⚠️ Error during disconnect: {e}")
 
 if __name__ == "__main__":
     asyncio.run(main())
