@@ -21,7 +21,7 @@ class CustomWebSocket:
         self.private_key = private_key
         self.session_cookie = None
         self.connected = False
-        self.subscribed_markets = []   # ✅ correct attribute
+        self.subscribed_markets = []   # correct attribute
         self.market_titles = {}        # conditionId → title
         self.sio = socketio.AsyncClient(logger=False, engineio_logger=False)
         self._setup_handlers()
@@ -48,19 +48,15 @@ class CustomWebSocket:
         async def system(data):
             print(f"[LLMM] System: {json.dumps(data)}")
 
+        # Odds handler (original)
         @self.sio.event(namespace="/markets")
         async def newPriceData(data):
-            """Formatted price banner"""
-            cid = data.get("conditionId")
-            prices = data.get("prices", [])
-            vol = data.get("volumeFormatted") or data.get("volume")
+            await self._print_price_banner(data)
 
-            yes, no = ("?", "?")
-            if len(prices) == 2:
-                yes, no = prices
-
-            title = self.market_titles.get(cid, cid[:6] + "…")
-            print(f"[LLMM] {title} → YES={yes} | NO={no} | Vol={vol}")
+        # Odds handler (alias for live odds)
+        @self.sio.event(namespace="/markets")
+        async def marketPriceData(data):
+            await self._print_price_banner(data)
 
         @self.sio.event(namespace="/markets")
         async def positions(data):
@@ -80,6 +76,19 @@ class CustomWebSocket:
                 print(f"[LLMM] Raw event: {event}\n{payload}")
             except Exception as e:
                 print(f"[LLMM] Raw event: {event} (unserializable) → {data} | Error: {e}")
+
+    async def _print_price_banner(self, data):
+        """Shared odds banner printer"""
+        cid = data.get("conditionId")
+        prices = data.get("prices", [])
+        vol = data.get("volumeFormatted") or data.get("volume")
+
+        yes, no = ("?", "?")
+        if len(prices) == 2:
+            yes, no = prices
+
+        title = self.market_titles.get(cid, cid[:6] + "…")
+        print(f"[LLMM] {title} → YES={yes} | NO={no} | Vol={vol}")
 
     async def connect(self):
         print(f"🔌 Connecting to {self.websocket_url}...")
@@ -107,7 +116,6 @@ class CustomWebSocket:
         if self.session_cookie:
             await self.sio.emit("subscribe_positions", payload, namespace="/markets")
 
-        # ✅ fixed: use correct attribute
         self.subscribed_markets = condition_ids
 
     async def unsubscribe_markets(self, condition_ids):
