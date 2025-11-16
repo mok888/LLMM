@@ -6,12 +6,14 @@ Custom Cockpit WebSocket Client
 - Formatted price banners
 - Title lookup from scanner payload
 - Catch-all logger
+- Heartbeat with timestamp
 """
 
 import asyncio
 import json
 import os
 import socketio
+from datetime import datetime
 
 class CustomWebSocket:
     def __init__(self, websocket_url="wss://ws.limitless.exchange", private_key=None):
@@ -135,29 +137,3 @@ class CustomWebSocket:
                         self.market_titles.update(data)
                     else:
                         new_ids = data
-
-                    new_ids = list(dict.fromkeys(new_ids))
-                    current_set = set(self.subscribed_markets)
-                    new_set = set(new_ids)
-
-                    to_add = list(new_set - current_set)
-                    to_remove = list(current_set - new_set)
-
-                    if to_add:
-                        print(f"[LLMM] Adding {len(to_add)} markets")
-                        await self.subscribe_markets(to_add)
-                    if to_remove:
-                        print(f"[LLMM] Removing {len(to_remove)} markets")
-                        await self.unsubscribe_markets(to_remove)
-                    if not to_add and not to_remove:
-                        print(f"[LLMM] Subscriptions already up-to-date ({len(new_ids)} markets)")
-                else:
-                    print("[LLMM] No hourly_markets.json found")
-
-            except Exception as e:
-                print(f"[LLMM] Refresh error: {e}")
-
-            await asyncio.sleep(interval)
-
-    async def wait(self):
-        await self.sio.wait()
