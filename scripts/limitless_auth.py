@@ -53,25 +53,26 @@ def verify_auth(session: requests.Session):
     banner(f"Verify status: {r.status_code}")
     banner(f"Verify response: {r.text}")
 
-def main():
+def get_session():
+    """Return an authenticated session object for reuse."""
     load_dotenv()
     pk = os.getenv("PRIVATE_KEY")
     if not pk:
         raise RuntimeError("PRIVATE_KEY missing in .env")
 
-    # Step 1: Get signing message
     message = get_signing_message()
     banner(f"Signing message:\n{message}")
 
-    # Step 2: Sign full message
     account, signature = sign_message(message, pk)
     banner(f"Signed message with account: {account}")
 
-    # Step 3: Login
     session, resp = login(account, message, signature)
-
-    # Step 4: Verify
     verify_auth(session)
+    return session
+
+def main():
+    # Run auth flow and return session
+    return get_session()
 
 if __name__ == "__main__":
     main()

@@ -5,8 +5,7 @@ Uses the stable authentication from limitless_auth.py
 """
 
 import json
-from limitless_auth import main as auth_main  # reuse your working auth script
-import requests
+from limitless_auth import get_session
 
 API_URL = "https://api.limitless.exchange"
 
@@ -18,15 +17,14 @@ def list_markets(session, page=1, limit=20):
     print("[LLMM] Markets status:", r.status_code)
     try:
         data = r.json()
-        print(json.dumps(data, indent=2)[:1000])  # print first 1000 chars
+        print(json.dumps(data, indent=2)[:1000])  # preview first 1000 chars
         return data
     except ValueError:
         print("[LLMM] Raw response:", r.text)
         return {"raw": r.text}
 
 def main():
-    # Get authenticated session from your auth script
-    session = auth_main()  # returns a requests.Session with cookie
+    session = get_session()  # returns a Session object
     list_markets(session)
 
 if __name__ == "__main__":
