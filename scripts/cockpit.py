@@ -2,18 +2,15 @@
 """
 Limitless Exchange Cockpit
 - Connects to WebSocket
-- Loads hourly_markets.json (conditionId → title)
-- Deduplication + Refresh + Unsubscribe
-- Formatted price banners
-- Catch-all logger
-- Heartbeat with timestamp
+- Loads hourly_markets.json
+- Prints lifecycle + heartbeat banners
 """
 
 import asyncio
 import json
 import os
 from datetime import datetime
-from custom_websocket import CustomWebSocket  # patched client
+from custom_websocket import CustomWebSocket
 
 REFRESH_INTERVAL = 300  # seconds (5 minutes)
 
@@ -26,12 +23,10 @@ async def main():
     client = CustomWebSocket(private_key=private_key)
     await client.connect()
 
-    # Initial subscription
     if os.path.exists("hourly_markets.json"):
         with open("hourly_markets.json") as f:
             data = json.load(f)
 
-        # Expect dict {conditionId: title}
         if isinstance(data, dict):
             condition_ids = list(data.keys())
             client.market_titles.update(data)
@@ -45,11 +40,9 @@ async def main():
     else:
         print("⚠️ No hourly_markets.json found")
 
-    # Startup heartbeat
     ts = datetime.now().strftime("%H:%M %Z")
     print(f"[LLMM] Heartbeat {ts} → {len(client.subscribed_markets)} markets active, cockpit online…")
 
-    # Start refresh loop in background
     asyncio.create_task(client.refresh_from_file("hourly_markets.json", REFRESH_INTERVAL))
 
     print("📡 Listening for events... Press Ctrl+C to stop")
