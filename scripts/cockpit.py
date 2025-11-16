@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """
 Limitless Exchange Cockpit
-- Connects to WebSocket
-- Loads hourly_markets.json
+- Connects to WebSocket client
+- Loads hourly_markets.json and subscribes
+- Starts refresh, probe, and silence monitor tasks
 - Prints lifecycle + heartbeat banners
-- Clean shutdown (disconnect before closing loop)
+- Clean shutdown via finally
 """
 
 import asyncio
@@ -21,11 +22,14 @@ async def main():
     print("Limitless Exchange Cockpit")
     print("=" * 50)
 
-    client = CustomWebSocket(private_key=private_key)
+    # verbose_logs=True enables transport logs; set to False once mapped
+    client = CustomWebSocket(private_key=private_key, verbose_logs=True)
 
     try:
         await client.connect()
 
+        # Load scanner output
+        condition_ids = []
         if os.path.exists("hourly_markets.json"):
             with open("hourly_markets.json") as f:
                 data = json.load(f)
@@ -36,28 +40,24 @@ async def main():
             else:
                 condition_ids = data
 
-            if condition_ids:
-                await client.subscribe_markets(condition_ids)
-            else:
-                print("⚠️ No market addresses to subscribe")
+        if condition_ids:
+            await client.subscribe_markets(condition_ids)
         else:
-            print("⚠️ No hourly_markets.json found")
+            print("⚠️ No market addresses to subscribe")
 
         ts = datetime.now().strftime("%H:%M %Z")
         print(f"[LLMM] Heartbeat {ts} → {len(client.subscribed_markets)} markets active, cockpit online…")
 
+        # Background tasks
         asyncio.create_task(client.refresh_from_file("hourly_markets.json", REFRESH_INTERVAL))
+        asyncio.create_task(client.periodic_probe(60))
+        asyncio.create_task(client.monitor_silence(300))
 
         print("📡 Listening for events... Press Ctrl+C to stop")
         await client.wait()
 
     finally:
-        # ✅ Clean shutdown: disconnect before closing loop
-        try:
-            await client.sio.disconnect()
-            print("🔌 Disconnected cleanly")
-        except Exception as e:
-            print(f"⚠️ Error during disconnect: {e}")
+        await client.close()
 
 if __name__ == "__main__":
     asyncio.run(main())

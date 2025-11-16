@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
 """
 Custom Cockpit WebSocket Client
-- Deduplication
-- Refresh + Unsubscribe
-- Formatted price banners
-- Title lookup from scanner payload
-- Catch-all logger dumps full JSON payloads
+- Connects to Limitless Exchange
+- Subscriptions with dual-key payloads (marketAddresses + conditionIds)
+- Formatted price banners for multiple event names
+- Catch-all logs full JSON, top-level keys, and highlights odds if present
+- Root namespace fallbacks to capture emissions on "/"
 - Heartbeat with timestamp
+- Periodic probe to request snapshots/pings
+- Silence monitor warns if no non-system events arrive
 """
 
 import asyncio
@@ -14,21 +16,29 @@ import json
 import os
 import socketio
 from datetime import datetime
+from time import time
 
 class CustomWebSocket:
-    def __init__(self, websocket_url="wss://ws.limitless.exchange", private_key=None):
+    def __init__(self, websocket_url="wss://ws.limitless.exchange", private_key=None, verbose_logs=True):
         self.websocket_url = websocket_url
         self.private_key = private_key
         self.session_cookie = None
         self.connected = False
-        self.subscribed_markets = []   # correct attribute
-        self.market_titles = {}        # conditionId → title
-        self.sio = socketio.AsyncClient(logger=False, engineio_logger=False)
+        self.subscribed_markets = []  # conditionIds or addresses (hashes)
+        self.market_titles = {}       # conditionId → title
+        self.last_non_system_event_ts = None
+
+        # Toggle transport logs for debugging mapping issues
+        self.sio = socketio.AsyncClient(
+            logger=verbose_logs,
+            engineio_logger=verbose_logs
+        )
         self._setup_handlers()
 
     def _setup_handlers(self):
         """Setup event handlers"""
 
+        # ===== Namespace: /markets =====
         @self.sio.event(namespace="/markets")
         async def connect():
             self.connected = True
@@ -48,34 +58,66 @@ class CustomWebSocket:
         async def system(data):
             print(f"[LLMM] System: {json.dumps(data)}")
 
-        # Odds handler (original)
+        # Odds handlers — cover common names
         @self.sio.event(namespace="/markets")
         async def newPriceData(data):
             await self._print_price_banner(data)
 
-        # Odds handler (alias for live odds)
         @self.sio.event(namespace="/markets")
         async def marketPriceData(data):
             await self._print_price_banner(data)
 
         @self.sio.event(namespace="/markets")
-        async def positions(data):
-            account = data.get("account")
-            positions = data.get("positions", [])
-            print(f"[LLMM] User {account} has {len(positions)} positions")
+        async def priceUpdate(data):
+            await self._print_price_banner(data)
+
+        # Generic handlers that some servers use
+        @self.sio.event(namespace="/markets")
+        async def data(data):
+            await self._maybe_highlight_and_dump("data", data, ns="/markets")
 
         @self.sio.event(namespace="/markets")
-        async def exception(data):
-            print(f"[LLMM] Exception: {json.dumps(data)}")
+        async def update(data):
+            await self._maybe_highlight_and_dump("update", data, ns="/markets")
 
-        # Catch-all logger: dump full JSON payload and highlight odds if present
+        @self.sio.event(namespace="/markets")
+        async def message(data):
+            await self._maybe_highlight_and_dump("message", data, ns="/markets")
+
+        # Catch-all logger: dump full JSON, keys, and highlight odds
         @self.sio.on("*", namespace="/markets")
         async def catch_all(event, data):
-            try:
-                payload = json.dumps(data, indent=2, sort_keys=True)
-                print(f"[LLMM] Raw event: {event}\n{payload}")
+            await self._maybe_highlight_and_dump(event, data, ns="/markets")
 
-                # Highlight odds if conditionId + prices are present
+        # ===== Root namespace (/) fallbacks =====
+        @self.sio.event
+        async def message(data):
+            await self._maybe_highlight_and_dump("message", data, ns="/")
+
+        @self.sio.on("*")
+        async def catch_all_root(event, data):
+            await self._maybe_highlight_and_dump(event, data, ns="/")
+
+    async def _maybe_highlight_and_dump(self, event, data, ns):
+        """Dump event payload, print keys, and highlight odds if present"""
+        try:
+            # Mark last non-system event
+            if event != "system":
+                self.last_non_system_event_ts = time()
+
+            # Keys summary
+            if isinstance(data, dict):
+                keys = list(data.keys())
+                print(f"[LLMM] {ns} Raw event: {event} | Keys: {keys}")
+            else:
+                print(f"[LLMM] {ns} Raw event: {event} | Non-dict payload")
+
+            # Full JSON dump
+            payload = json.dumps(data, indent=2, sort_keys=True)
+            print(payload)
+
+            # Highlight odds if present at top-level
+            if isinstance(data, dict):
                 cid = data.get("conditionId")
                 prices = data.get("prices")
                 if cid and prices:
@@ -83,21 +125,26 @@ class CustomWebSocket:
                     if isinstance(prices, list) and len(prices) == 2:
                         yes, no = prices
                     title = self.market_titles.get(cid, cid[:6] + "…")
-                    print(f"[LLMM] 🔎 Detected odds in {event}: {title} → YES={yes} | NO={no}")
-            except Exception as e:
-                print(f"[LLMM] Raw event: {event} (unserializable) → {data} | Error: {e}")
+                    print(f"[LLMM] 🔎 Detected odds in {ns}:{event}: {title} → YES={yes} | NO={no}")
+        except Exception as e:
+            print(f"[LLMM] {ns} Raw event: {event} (unserializable) → {data} | Error: {e}")
 
     async def _print_price_banner(self, data):
         """Shared odds banner printer"""
-        cid = data.get("conditionId")
-        prices = data.get("prices", [])
-        vol = data.get("volumeFormatted") or data.get("volume")
+        cid = None
+        prices = None
+        vol = None
+
+        if isinstance(data, dict):
+            cid = data.get("conditionId")
+            prices = data.get("prices", [])
+            vol = data.get("volumeFormatted") or data.get("volume")
 
         yes, no = ("?", "?")
-        if len(prices) == 2:
+        if isinstance(prices, list) and len(prices) == 2:
             yes, no = prices
 
-        title = self.market_titles.get(cid, cid[:6] + "…")
+        title = self.market_titles.get(cid, cid[:6] + "…") if cid else "Unknown"
         print(f"[LLMM] {title} → YES={yes} | NO={no} | Vol={vol}")
 
     async def connect(self):
@@ -113,19 +160,27 @@ class CustomWebSocket:
             print("❌ Connection failed")
 
     async def subscribe_markets(self, condition_ids):
-        """Subscribe to markets"""
+        """Subscribe to markets (try both payload keys to avoid silent streams)"""
         if not self.connected:
             print("❌ Not connected")
             return
 
         condition_ids = list(dict.fromkeys(condition_ids))  # deduplicate
-        payload = {"marketAddresses": condition_ids}
-        await self.sio.emit("subscribe_market_prices", payload, namespace="/markets")
-        print(f"[LLMM] Subscribed to {len(condition_ids)} markets")
+
+        payload_addresses = {"marketAddresses": condition_ids}
+        payload_conditions = {"conditionIds": condition_ids}
+
+        print(f"[LLMM] Emitting subscribe_market_prices with payload: {payload_addresses}")
+        await self.sio.emit("subscribe_market_prices", payload_addresses, namespace="/markets")
+
+        # Fallback emit in case the server expects 'conditionIds'
+        print(f"[LLMM] Emitting (fallback) subscribe_market_prices with payload: {payload_conditions}")
+        await self.sio.emit("subscribe_market_prices", payload_conditions, namespace="/markets")
 
         if self.session_cookie:
-            await self.sio.emit("subscribe_positions", payload, namespace="/markets")
+            await self.sio.emit("subscribe_positions", payload_addresses, namespace="/markets")
 
+        print(f"[LLMM] Subscribed to {len(condition_ids)} markets")
         self.subscribed_markets = condition_ids
 
     async def unsubscribe_markets(self, condition_ids):
@@ -183,5 +238,35 @@ class CustomWebSocket:
 
             await asyncio.sleep(interval)
 
+    async def periodic_probe(self, interval=60):
+        """Periodically request snapshots/pings to surface any odds packets"""
+        while True:
+            try:
+                await self.sio.emit("request_market_snapshot", {"marketAddresses": self.subscribed_markets}, namespace="/markets")
+                await self.sio.emit("ping_prices", {"marketAddresses": self.subscribed_markets}, namespace="/markets")
+                print(f"[LLMM] Probe → requested snapshot/ping for {len(self.subscribed_markets)} markets")
+            except Exception as e:
+                print(f"[LLMM] Probe error: {e}")
+            await asyncio.sleep(interval)
+
+    async def monitor_silence(self, warn_after=300):
+        """Warn if we haven't seen non-system events for too long"""
+        while True:
+            if self.last_non_system_event_ts is None:
+                print("[LLMM] Silence monitor: no non-system events observed yet")
+            else:
+                delta = time() - self.last_non_system_event_ts
+                if delta > warn_after:
+                    print(f"[LLMM] Warning: {int(delta)}s without non-system events")
+            await asyncio.sleep(30)
+
     async def wait(self):
         await self.sio.wait()
+
+    async def close(self):
+        """Clean disconnect"""
+        try:
+            await self.sio.disconnect()
+            print("🔌 Disconnected cleanly")
+        except Exception as e:
+            print(f"⚠️ Error during disconnect: {e}")
