@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Cockpit Script with Integrated Refresh + Deduplication
+Cockpit Script with Integrated Refresh + Deduplication + Unsubscribe
 """
 
 import asyncio
@@ -21,21 +21,40 @@ def deduplicate(addresses):
     return unique
 
 async def refresh_markets(client):
-    """Reload hourly_markets.json and resubscribe periodically"""
+    """Reload hourly_markets.json and adjust subscriptions periodically"""
     while True:
         try:
             if os.path.exists("hourly_markets.json"):
                 with open("hourly_markets.json") as f:
-                    market_addresses = json.load(f)
+                    new_addresses = json.load(f)
 
-                # Deduplicate before subscribing
-                market_addresses = deduplicate(market_addresses)
+                new_addresses = deduplicate(new_addresses)
 
-                if market_addresses:
-                    print(f"[LLMM] Refreshing subscriptions → {len(market_addresses)} unique markets")
-                    await client.subscribe_markets(market_addresses)
-                else:
-                    print("[LLMM] Refresh file found but empty")
+                # Current subscribed set
+                current_set = set(client.subscribed_markets)
+                new_set = set(new_addresses)
+
+                # Find additions and removals
+                to_add = list(new_set - current_set)
+                to_remove = list(current_set - new_set)
+
+                if to_add:
+                    print(f"[LLMM] Adding {len(to_add)} new markets → {to_add}")
+                    await client.subscribe_markets(to_add)
+
+                if to_remove:
+                    print(f"[LLMM] Removing {len(to_remove)} markets → {to_remove}")
+                    # Emit unsubscribe events
+                    payload = {'marketAddresses': to_remove}
+                    await client.sio.emit('unsubscribe_market_prices', payload, namespace='/markets')
+                    if client.session_cookie:
+                        await client.sio.emit('unsubscribe_positions', payload, namespace='/markets')
+                    # Update local tracking
+                    client.subscribed_markets = [addr for addr in client.subscribed_markets if addr not in to_remove]
+
+                if not to_add and not to_remove:
+                    print("[LLMM] Subscriptions already up-to-date")
+
             else:
                 print("[LLMM] No hourly_markets.json found. Run scanner first.")
 
