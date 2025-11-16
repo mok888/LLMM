@@ -68,12 +68,22 @@ class CustomWebSocket:
         async def exception(data):
             print(f"[LLMM] Exception: {json.dumps(data)}")
 
-        # Catch-all logger: dump full JSON payload
+        # Catch-all logger: dump full JSON payload and highlight odds if present
         @self.sio.on("*", namespace="/markets")
         async def catch_all(event, data):
             try:
                 payload = json.dumps(data, indent=2, sort_keys=True)
                 print(f"[LLMM] Raw event: {event}\n{payload}")
+
+                # Highlight odds if conditionId + prices are present
+                cid = data.get("conditionId")
+                prices = data.get("prices")
+                if cid and prices:
+                    yes, no = ("?", "?")
+                    if isinstance(prices, list) and len(prices) == 2:
+                        yes, no = prices
+                    title = self.market_titles.get(cid, cid[:6] + "…")
+                    print(f"[LLMM] 🔎 Detected odds in {event}: {title} → YES={yes} | NO={no}")
             except Exception as e:
                 print(f"[LLMM] Raw event: {event} (unserializable) → {data} | Error: {e}")
 
