@@ -4,7 +4,7 @@ Custom Cockpit WebSocket Client
 - Connects to Limitless Exchange
 - Subscriptions with marketAddresses payload (fallback commented)
 - Formatted price banners for multiple event names
-- Catch-all logs top-level keys, full JSON, and highlights odds if present
+- Catch-all logs top-level keys, full JSON, recursively finds odds-like objects
 - Root namespace fallbacks to capture emissions on "/"
 - Heartbeat with timestamp
 - Periodic probe to request snapshots/pings (server-tolerant)
@@ -100,7 +100,7 @@ class CustomWebSocket:
             await self._maybe_highlight_and_dump(event, data, ns="/")
 
     async def _maybe_highlight_and_dump(self, event, data, ns):
-        """Dump event payload, print keys, and highlight odds if present"""
+        """Dump event payload, print keys, and recursively find any odds objects"""
         try:
             # Mark last non-system event
             if event != "system":
@@ -113,30 +113,53 @@ class CustomWebSocket:
             else:
                 print(f"[LLMM] {ns} Raw event: {event} | Non-dict payload")
 
-            # Full JSON dump
+            # Full JSON dump (safe fallback for non-serializable)
             try:
                 payload = json.dumps(data, indent=2, sort_keys=True)
             except Exception:
                 payload = str(data)
             print(payload)
 
-            # Highlight odds if present at top-level
-            if isinstance(data, dict):
-                cid = data.get("conditionId")
-                prices = data.get("prices")
-                # also check common nesting patterns
-                if not cid and "markets" in data and isinstance(data["markets"], list) and data["markets"]:
-                    m0 = data["markets"][0]
-                    if isinstance(m0, dict):
-                        cid = m0.get("conditionId") or cid
-                        prices = m0.get("prices") or prices
+            # Recursive scan for odds-like objects
+            def find_odds(obj, path="root"):
+                found = []
+                if isinstance(obj, dict):
+                    # direct match
+                    cid = obj.get("conditionId") or obj.get("condition_id") or obj.get("id")
+                    prices = obj.get("prices") or obj.get("price") or obj.get("odds") or obj.get("pricesFormatted")
+                    if cid and prices:
+                        found.append((path, cid, prices, obj))
+                    # descend into children
+                    for k, v in obj.items():
+                        new_path = f"{path}.{k}"
+                        found.extend(find_odds(v, new_path))
+                elif isinstance(obj, list):
+                    for i, item in enumerate(obj):
+                        new_path = f"{path}[{i}]"
+                        found.extend(find_odds(item, new_path))
+                return found
 
-                if cid and prices:
-                    yes, no = ("?", "?")
-                    if isinstance(prices, list) and len(prices) == 2:
-                        yes, no = prices
-                    title = self.market_titles.get(cid, cid[:6] + "…")
-                    print(f"[LLMM] 🔎 Detected odds in {ns}:{event}: {title} → YES={yes} | NO={no}")
+            matches = find_odds(data)
+            # also check common top-level "markets" list if not already matched
+            if isinstance(data, dict) and "markets" in data and not matches:
+                matches.extend(find_odds(data["markets"], path="root.markets"))
+
+            for path, cid, prices, raw in matches:
+                # normalize prices list if possible
+                yes, no = ("?", "?")
+                if isinstance(prices, list) and len(prices) >= 2:
+                    yes, no = prices[0], prices[1]
+                elif isinstance(prices, (str, int, float)):
+                    yes = prices
+                title = self.market_titles.get(cid, cid[:6] + "…") if isinstance(cid, str) else str(cid)
+                print(f"[LLMM] 🔎 Detected odds at {ns}:{event}:{path} → {title} | YES={yes} | NO={no}")
+                # print raw snippet for operator clarity (compact)
+                try:
+                    snippet = json.dumps(raw, indent=2, sort_keys=True)
+                except Exception:
+                    snippet = str(raw)
+                print(snippet)
+
         except Exception as e:
             print(f"[LLMM] {ns} Raw event: {event} (unserializable) → {data} | Error: {e}")
 
@@ -272,35 +295,4 @@ class CustomWebSocket:
                 }
 
                 # Try a list of common probe event names; server will respond or error
-                for ev in ("request_market_snapshot", "ping_prices", "requestPrices"):
-                    try:
-                        await self.sio.emit(ev, payload, namespace="/markets")
-                        print(f"[LLMM] Probe → emitted {ev} for {len(self.subscribed_markets)} markets")
-                    except Exception as inner:
-                        print(f"[LLMM] Probe emit {ev} error: {inner}")
-
-            except Exception as e:
-                print(f"[LLMM] Probe error: {e}")
-            await asyncio.sleep(interval)
-
-    async def monitor_silence(self, warn_after=300):
-        """Warn if we haven't seen non-system events for too long"""
-        while True:
-            if self.last_non_system_event_ts is None:
-                print("[LLMM] Silence monitor: no non-system events observed yet")
-            else:
-                delta = time() - self.last_non_system_event_ts
-                if delta > warn_after:
-                    print(f"[LLMM] Warning: {int(delta)}s without non-system events")
-            await asyncio.sleep(30)
-
-    async def wait(self):
-        await self.sio.wait()
-
-    async def close(self):
-        """Clean disconnect"""
-        try:
-            await self.sio.disconnect()
-            print("🔌 Disconnected cleanly")
-        except Exception as e:
-            print(f"⚠️ Error during disconnect: {e}")
+                for ev in ("request_market_snapshot
