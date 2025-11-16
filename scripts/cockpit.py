@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """
 Limitless Exchange Cockpit
-- Starts the CustomWebSocket client
-- Loads hourly_markets.json and subscribes
+- Loads hourly_markets.json
+- Connects WebSocket client
 - Starts refresh, probe, and silence monitor tasks
+- Provides a small helper to probe one market manually after connect
 """
 
 import asyncio
@@ -45,12 +46,24 @@ async def main():
         ts = datetime.now().strftime("%H:%M %Z")
         print(f"[LLMM] Heartbeat {ts} → {len(client.subscribed_markets)} markets active, cockpit online…")
 
+        # Background tasks
         asyncio.create_task(client.refresh_from_file("hourly_markets.json", REFRESH_INTERVAL))
         asyncio.create_task(client.periodic_probe(60))
         asyncio.create_task(client.monitor_silence(300))
 
         print("📡 Listening for events... Press Ctrl+C to stop")
+
+        # Optional interactive probe: if you pass --probe <marketAddress> the script will probe it once
+        if "--probe" in sys.argv:
+            try:
+                idx = sys.argv.index("--probe")
+                addr = sys.argv[idx + 1]
+                await client.probe_one_market(addr)
+            except Exception as e:
+                print(f"[LLMM] Probe CLI error: {e}")
+
         await client.wait()
+
     finally:
         await client.close()
 

@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
 """
-Custom Cockpit WebSocket Client - canonical subscribe with ack
+Custom Cockpit WebSocket Client - canonical subscribe with ack + probe fallback
 
 Features:
-- Connects to Limitless WebSocket (socket.io)
+- Connects to Limitless WebSocket (socket.io) with explicit headers
 - Uses canonical {"marketAddresses": [...]} subscribe payload and waits for server ack
 - Avoids emitting the same event name with different payload shapes
-- Safe fallback event names (different names only) emitted with ack observation
+- Optional single-market probe via request_market_snapshot (call/ack)
 - Catch-all recursive JSON scanner that finds odds-like objects
 - Periodic probe, file-based refresh of market list, silence monitor, clean disconnect
+- REST snapshot fallback helper (uses aiohttp) for environments where socket stream doesn't produce prices
 """
 
 import asyncio
@@ -17,6 +18,12 @@ import os
 import socketio
 from datetime import datetime
 from time import time
+
+# Optional: only import aiohttp when REST fallback is used to avoid heavy dependency at import time
+try:
+    import aiohttp  # used by rest_snapshot if needed
+except Exception:
+    aiohttp = None
 
 class CustomWebSocket:
     def __init__(self, websocket_url="wss://ws.limitless.exchange", private_key=None, verbose_logs=True):
@@ -60,7 +67,7 @@ class CustomWebSocket:
         async def error(data):
             print(f"[LLMM] Server error on /markets: {json.dumps(data)}")
 
-        # Common direct price events
+        # Known direct price events (common names)
         @self.sio.event(namespace="/markets")
         async def newPriceData(data):
             await self._print_price_banner(data)
@@ -107,7 +114,7 @@ class CustomWebSocket:
         async def catch_all_root(event, data):
             await self._maybe_highlight_and_dump(event, data, ns="/")
 
-        # /prices fallback
+        # /prices fallback namespace (if present on server)
         try:
             @self.sio.on("*", namespace="/prices")
             async def catch_all_prices(event, data):
@@ -252,7 +259,6 @@ class CustomWebSocket:
 
         - Emit only once with marketAddresses to avoid conflicting payload shapes.
         - Observe ack; if server indicates error, it will be printed.
-        - Optionally emit safe fallback event names (different names only).
         """
         if not self.connected:
             print("❌ Not connected")
@@ -262,10 +268,9 @@ class CustomWebSocket:
         payload = {"marketAddresses": condition_ids}
 
         print(f"[LLMM] Emitting canonical subscribe_market_prices with payload: {payload}")
-        ack = await self._emit_with_ack("subscribe_market_prices", payload, namespace="/markets", timeout=6)
+        ack = await self._emit_with_ack("subscribe_market_prices", payload, namespace="/markets", timeout=12)
 
         if isinstance(ack, dict):
-            # best-effort check for success
             if ack.get("markets") or (ack.get("message") and "success" in ack.get("message", "").lower()):
                 print(f"[LLMM] Server ack indicates subscription success: {ack}")
             else:
@@ -273,23 +278,38 @@ class CustomWebSocket:
         elif ack is None:
             print("[LLMM] No ack received for canonical subscribe — server may still accept via system message")
 
-        # Safe fallbacks: different event names only (do NOT re-emit the same event name with different keys)
-        fallbacks = [
-            ("subscribe_markets", payload),
-            ("subscribe", payload),
-            ("subscribePrices", payload),
-        ]
-        for ev, p in fallbacks:
-            resp = await self._emit_with_ack(ev, p, namespace="/markets", timeout=3)
-            if resp:
-                print(f"[LLMM] Fallback {ev} ack: {resp}")
-
-        # Subscribe positions if authenticated
-        if self.session_cookie:
-            await self._emit_with_ack("subscribe_positions", payload, namespace="/markets", timeout=5)
-
+        # Do NOT re-emit 'subscribe_market_prices' with different keys.
+        # Optionally, probe single market via call-based snapshot if no prices flow in.
         self.subscribed_markets = condition_ids
-        print(f"[LLMM] Subscribed to {len(condition_ids)} markets (canonical emit + optional fallbacks)")
+        print(f"[LLMM] Subscribed to {len(condition_ids)} markets (canonical only)")
+
+    async def probe_one_market(self, market_address, timeout=8):
+        """Probe a single market for snapshot prices via server call/ack"""
+        if not self.connected:
+            print("❌ Not connected")
+            return None
+        payload = {"marketAddresses": [market_address], "marketSlugs": []}
+        resp = await self._emit_with_ack("request_market_snapshot", payload, namespace="/markets", timeout=timeout)
+        print(f"[LLMM] Single-market probe resp for {market_address}: {resp}")
+        return resp
+
+    async def rest_snapshot(self, market_address, base_url="https://api.limitless.exchange"):
+        """REST snapshot fallback if socket doesn't deliver prices (requires aiohttp)"""
+        if aiohttp is None:
+            print("[LLMM] aiohttp not available; install aiohttp to use REST fallback")
+            return None
+        # Endpoint path may vary; this is an example placeholder — adapt to real API
+        url = f"{base_url}/markets/{market_address}/snapshot"
+        headers = {"User-Agent": "LLMM/1.0"}
+        try:
+            async with aiohttp.ClientSession() as s:
+                async with s.get(url, headers=headers) as r:
+                    j = await r.json()
+                    print(f"[LLMM] REST snapshot {market_address}: {json.dumps(j)[:1000]}")
+                    return j
+        except Exception as e:
+            print(f"[LLMM] REST snapshot error: {e}")
+            return None
 
     async def unsubscribe_markets(self, condition_ids):
         payload = {"marketAddresses": condition_ids}
@@ -304,6 +324,7 @@ class CustomWebSocket:
             await self.subscribe_markets(self.subscribed_markets)
 
     async def refresh_from_file(self, filename="hourly_markets.json", interval=300):
+        """Reload scanner output and sync subscriptions"""
         while True:
             try:
                 if os.path.exists(filename):
@@ -339,6 +360,7 @@ class CustomWebSocket:
             await asyncio.sleep(interval)
 
     async def periodic_probe(self, interval=60):
+        """Periodically request snapshots/pings using canonical payload (no duplicate subscribe)"""
         while True:
             try:
                 if not self.subscribed_markets:
