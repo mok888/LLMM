@@ -1,17 +1,23 @@
 #!/usr/bin/env python3
 """
-Hourly Market Scanner (Discovery)
-Fetches active hourly markets and saves their addresses to hourly_markets.json
+Debug Scanner
+Sweeps categories, prints raw payloads, and extracts market addresses if present
 """
 
 import json
-import requests
-from limitless_auth import get_session  # your existing auth helper
+from limitless_auth import get_session
 
 API_URL = "https://api.limitless.exchange"
 
-def get_hourly_markets(session):
-    url = f"{API_URL}/markets/active/29"  # categoryId for hourly
+CATEGORY_MAP = {
+    "hourly": 29,
+    "daily": 30,
+    "weekly": 31,
+    "tge": 43
+}
+
+def get_markets(session, category_id):
+    url = f"{API_URL}/markets/active/{category_id}"
     r = session.get(url, timeout=30)
     r.raise_for_status()
     payload = r.json()
@@ -19,17 +25,22 @@ def get_hourly_markets(session):
 
 if __name__ == "__main__":
     session = get_session()
-    hourly_markets = get_hourly_markets(session)
 
-    # Extract market addresses (not IDs)
-    addresses = []
-    for m in hourly_markets:
-        addr = m.get("marketAddress")
-        if addr:
-            addresses.append(addr)
+    for name, cid in CATEGORY_MAP.items():
+        markets = get_markets(session, cid)
+        print(f"\n[LLMM] Category {name} ({cid}) → {len(markets)} markets")
 
-    print(f"[LLMM] Hourly markets discovered: {addresses}")
+        if not markets:
+            print("   ⚠️ No markets returned")
+            continue
 
-    # Save addresses to file for cockpit to consume
-    with open("hourly_markets.json", "w") as f:
-        json.dump(addresses, f, indent=2)
+        # Print raw payload for operator clarity
+        print("   Raw payload sample:")
+        print(json.dumps(markets[:2], indent=2))  # show first 2
+
+        # Extract addresses if present
+        addresses = [m.get("marketAddress") for m in markets if "marketAddress" in m]
+        if addresses:
+            print(f"   ✅ Extracted {len(addresses)} market addresses: {addresses}")
+        else:
+            print("   ⚠️ No 'marketAddress' field found, check payload keys")
