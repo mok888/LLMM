@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
-Limitless Exchange Deep Category Scanner
+Limitless Exchange Continuous Deep Category Scanner
 Fetches category IDs + totals, then scans all markets within each category.
+Displays ticker, strike, and deadline for operator clarity.
 """
 
 import time
@@ -20,7 +21,8 @@ def get_markets_by_category(session, category_id, limit=100):
     url = f"{API_URL}/markets/active"
     params = {"category": category_id, "limit": str(limit)}
     r = session.get(url, params=params, timeout=30)
-    return r.json().get("data", [])
+    # FIX: use 'markets' key instead of 'data'
+    return r.json().get("markets", [])
 
 def deep_scan(interval=180):
     """Scan category IDs, then deep scan all markets inside each category."""
@@ -44,7 +46,8 @@ def deep_scan(interval=180):
                 ticker = m.get("ticker") or "N/A"
                 strike = m.get("strikePrice") or "N/A"
                 deadline = m.get("expirationDate") or "N/A"
-                print(f"  - {m['title']} | Ticker {ticker} | Strike {strike} | Deadline {deadline}")
+                title = m.get("title") or m.get("slug")
+                print(f"  - {title} | Ticker {ticker} | Strike {strike} | Deadline {deadline}")
 
         time.sleep(interval)
 
