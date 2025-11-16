@@ -9,21 +9,21 @@ import time
 API_URL = "https://api.limitless.exchange"
 
 def discover_hourly_market(page=1, limit=10, retries=3):
-    """Discover newest Hourly market via REST /markets/active/{categoryId}."""
-    category_id = 1  # Hourly category
-    url = f"{API_URL}/markets/active/{category_id}"
+    """Discover newest Hourly market via REST /markets/active."""
+    url = f"{API_URL}/markets/active"
     params = {"page": str(page), "limit": str(limit), "sortBy": "newest"}
     print(f"[LLMM] Discovering Hourly markets: {url} {params}")
     for attempt in range(retries):
         try:
-            r = requests.get(url, params=params, timeout=15)
+            r = requests.get(url, params=params, timeout=30)
             if r.status_code == 200:
                 data = r.json()
                 markets = data.get("data", [])
-                if not markets:
+                hourly_markets = [m for m in markets if "Hourly" in m.get("categories", [])]
+                if not hourly_markets:
                     print("[LLMM] No Hourly markets found.")
                     return None, None
-                m = markets[0]
+                m = hourly_markets[0]
                 print(f"[LLMM] Selected Hourly market slug={m['slug']} id={m['id']} title={m['title']}")
                 return m["slug"], m["id"]
             else:
@@ -78,36 +78,4 @@ async def test_ws(market_id):
         print("[LLMM] WS ERROR:", e)
 
 async def hourly_scanner(slug, market_id, fast_forward=False):
-    """Run probes at HH:59:55 and HH:00:15 (or fast-forward for testing)."""
-    while True:
-        if fast_forward:
-            before = datetime.datetime.now() + datetime.timedelta(seconds=10)
-            after = datetime.datetime.now() + datetime.timedelta(seconds=20)
-        else:
-            now = datetime.datetime.now()
-            next_hour = (now.replace(minute=0, second=0, microsecond=0)
-                         + datetime.timedelta(hours=1))
-            before = next_hour - datetime.timedelta(seconds=5)
-            after = next_hour + datetime.timedelta(seconds=15)
-
-        await asyncio.sleep((before - datetime.datetime.now()).total_seconds())
-        test_rest_market(slug, "PREVIOUS HOUR END")
-
-        await asyncio.sleep((after - datetime.datetime.now()).total_seconds())
-        test_rest_market(slug, "NEXT HOUR START")
-        await test_ws(market_id)
-
-def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--test", action="store_true", help="Run in fast-forward mode")
-    args = parser.parse_args()
-
-    print("[LLMM] Starting Hourly market scanner...")
-    slug, market_id = discover_hourly_market(limit=10)
-    if slug and market_id:
-        asyncio.run(hourly_scanner(slug, market_id, fast_forward=args.test))
-    else:
-        print("[LLMM] No Hourly market available to scan.")
-
-if __name__ == "__main__":
-    main()
+    """Run probes
