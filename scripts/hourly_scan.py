@@ -19,8 +19,10 @@ if __name__ == "__main__":
     session = get_session()
     hourly_markets = get_hourly_markets(session)
 
-    ids = [m["id"] for m in hourly_markets]
-    print(f"[LLMM] Hourly markets discovered: {ids}")
+    # Extract market addresses
+    addresses = [m["marketAddress"] for m in hourly_markets if "marketAddress" in m]
+
+    print(f"[LLMM] Hourly markets discovered: {addresses}")
 
     with open("hourly_markets.json", "w") as f:
-        json.dump(hourly_markets, f, indent=2)
+        json.dump(addresses, f, indent=2)
