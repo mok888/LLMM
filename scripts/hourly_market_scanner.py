@@ -8,34 +8,44 @@ import time
 
 API_URL = "https://api.limitless.exchange"
 
-def discover_hourly_market(page=1, limit=10, retries=3):
-    """Discover newest Hourly market via REST /markets/active."""
+def list_active_markets(page=1, limit=50, retries=3):
+    """List all active markets via REST /markets/active."""
     url = f"{API_URL}/markets/active"
     params = {"page": str(page), "limit": str(limit), "sortBy": "newest"}
-    print(f"[LLMM] Discovering Hourly markets: {url} {params}")
+    print(f"[LLMM] Listing active markets: {url} {params}")
     for attempt in range(retries):
         try:
             r = requests.get(url, params=params, timeout=30)
             if r.status_code == 200:
                 data = r.json()
                 markets = data.get("data", [])
-                hourly_markets = [m for m in markets if "Hourly" in m.get("categories", [])]
-                if not hourly_markets:
-                    print("[LLMM] No Hourly markets found.")
-                    return None, None
-                m = hourly_markets[0]
-                print(f"[LLMM] Selected Hourly market slug={m['slug']} id={m['id']} title={m['title']}")
-                return m["slug"], m["id"]
+                if not markets:
+                    print("[LLMM] No markets found.")
+                    return []
+                for m in markets:
+                    print(f"[LLMM] id={m['id']} slug={m['slug']} title={m['title']} categories={m.get('categories', [])}")
+                return markets
             else:
-                print(f"[LLMM] Discovery failed: {r.status_code} {r.text}")
+                print(f"[LLMM] Listing failed: {r.status_code} {r.text}")
         except requests.exceptions.ReadTimeout:
             wait = 2 ** attempt
             print(f"[LLMM] Timeout on attempt {attempt+1}, retrying in {wait}s...")
             time.sleep(wait)
         except Exception as e:
-            print("[LLMM] Discovery ERROR:", e)
+            print("[LLMM] Listing ERROR:", e)
             time.sleep(2)
-    return None, None
+    return []
+
+def discover_hourly_market(page=1, limit=10):
+    """Filter for newest Hourly market from active list."""
+    markets = list_active_markets(page=page, limit=limit)
+    hourly_markets = [m for m in markets if "Hourly" in m.get("categories", [])]
+    if not hourly_markets:
+        print("[LLMM] No Hourly markets found.")
+        return None, None
+    m = hourly_markets[0]
+    print(f"[LLMM] Selected Hourly market slug={m['slug']} id={m['id']} title={m['title']}")
+    return m["slug"], m["id"]
 
 def test_rest_market(slug, label):
     """Probe REST market endpoint for a given slug."""
@@ -111,3 +121,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+s
