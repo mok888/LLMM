@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """
-Hourly Market Scanner (Discovery)
-Fetches active hourly markets and saves usable identifiers to hourly_markets.json
+Hourly Market Scanner with Debug
+- Fetches active hourly markets
+- Saves {conditionId: title} mapping
+- Prints raw payload samples for operator clarity
 """
 
 import json
@@ -20,17 +22,24 @@ if __name__ == "__main__":
     session = get_session()
     hourly_markets = get_hourly_markets(session)
 
-    # Extract usable identifiers
-    addresses = []
+    # Build mapping {conditionId: title}
+    market_map = {}
     for m in hourly_markets:
-        # Prefer conditionId if present
-        if "conditionId" in m:
-            addresses.append(m["conditionId"])
-        # Fallback: yes/no token addresses
-        elif "tokens" in m:
-            addresses.extend([m["tokens"].get("yes"), m["tokens"].get("no")])
+        cid = m.get("conditionId")
+        title = m.get("title")
+        if cid and title:
+            market_map[cid] = title
 
-    print(f"[LLMM] Hourly markets discovered: {addresses}")
+    print(f"[LLMM] Hourly markets discovered: {len(market_map)}")
 
+    if hourly_markets:
+        print("   Raw payload sample:")
+        print(json.dumps(hourly_markets[:2], indent=2))  # show first 2 markets
+
+    for cid, title in market_map.items():
+        print(f"   {cid[:6]}… → {title}")
+
+    # Save mapping to file
     with open("hourly_markets.json", "w") as f:
-        json.dump(addresses, f, indent=2)
+        json.dump(market_map, f, indent=2)
+    print("[LLMM] Saved hourly_markets.json")
