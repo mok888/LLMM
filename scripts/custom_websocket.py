@@ -59,4 +59,8 @@ class CustomWebSocket:
             if len(prices) == 2:
                 yes, no = prices
 
-            title = self.market_titles.get(cid, cid[:6] +
+            # ✅ Fixed fallback line
+            title = self.market_titles.get(cid, cid[:6] + "…")
+            print(f"[LLMM] {title} → YES={yes} | NO={no} | Vol={vol}")
+
+        @self.sio.event
