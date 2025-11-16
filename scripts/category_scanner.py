@@ -2,7 +2,7 @@
 """
 Limitless Exchange Continuous Deep Category Scanner
 Fetches category IDs + totals, then scans all markets within each category.
-Displays ticker, strike, and deadline for operator clarity.
+Auto-detects JSON key ('markets' vs 'data') to avoid empty results.
 """
 
 import time
@@ -21,8 +21,16 @@ def get_markets_by_category(session, category_id, limit=100):
     url = f"{API_URL}/markets/active"
     params = {"category": category_id, "limit": str(limit)}
     r = session.get(url, params=params, timeout=30)
-    # FIX: use 'markets' key instead of 'data'
-    return r.json().get("markets", [])
+    payload = r.json()
+
+    # Auto-detect key
+    if "markets" in payload:
+        return payload["markets"]
+    elif "data" in payload:
+        return payload["data"]
+    else:
+        print(f"[LLMM] Unexpected response for category {category_id}: {payload}")
+        return []
 
 def deep_scan(interval=180):
     """Scan category IDs, then deep scan all markets inside each category."""
