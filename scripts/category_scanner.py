@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """
 Limitless Exchange Continuous Deep Category Scanner
-Fetches category IDs + totals, then scans all markets within each category.
-Auto-detects JSON key ('markets' vs 'data') to avoid empty results.
+- Fetches category IDs + totals
+- Scans all markets within each category
+- Supports both numeric IDs (categoryId) and text labels (categorySlug)
+- Enforces limit <= 25
 """
 
 import time
@@ -16,20 +18,31 @@ def get_categories(session):
     r = session.get(url, timeout=30)
     return r.json()
 
-def get_markets_by_category(session, category_id, limit=100):
-    """Fetch active markets for a given category ID."""
+def get_markets_by_category(session, category_key, limit=25):
+    """
+    Fetch active markets for a given category.
+    Accepts either numeric ID (int/str) or text label (slug).
+    """
     url = f"{API_URL}/markets/active"
-    params = {"category": category_id, "limit": str(limit)}
+
+    # Decide whether to use categoryId or categorySlug
+    params = {}
+    if str(category_key).isdigit():
+        params["categoryId"] = category_key
+    else:
+        params["categorySlug"] = category_key
+
+    params["limit"] = str(min(limit, 25))  # enforce API limit
+
     r = session.get(url, params=params, timeout=30)
     payload = r.json()
 
-    # Auto-detect key
     if "markets" in payload:
         return payload["markets"]
     elif "data" in payload:
         return payload["data"]
     else:
-        print(f"[LLMM] Unexpected response for category {category_id}: {payload}")
+        print(f"[LLMM] Unexpected response for category {category_key}: {payload}")
         return []
 
 def deep_scan(interval=180):
