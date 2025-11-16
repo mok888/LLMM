@@ -1,5 +1,4 @@
 import os
-import re
 import requests
 from eth_account import Account
 from eth_account.messages import encode_defunct
@@ -19,13 +18,6 @@ def get_signing_message():
     print("[LLMM] Signing message:", message)
     return message
 
-def extract_nonce(message):
-    """Extract hex nonce from signing message text."""
-    match = re.search(r"Nonce:\s*(0x[0-9a-fA-F]+)", message)
-    if not match:
-        raise RuntimeError("Nonce not found in signing message")
-    return match.group(1)
-
 def sign_message(message, private_key):
     """Step 2: Sign the full message with Ethereum private key."""
     acct = Account.from_key(private_key)
@@ -38,15 +30,12 @@ def login(account, message, signature):
     """Step 3: Login with headers and body, store session cookie."""
     url = f"{API_URL}/auth/login"
 
-    # Extract nonce for header
-    nonce = extract_nonce(message)
-
     headers = {
         "x-account": account,
-        "x-signing-message": nonce,   # only the hex nonce
+        "x-signing-message": message,   # exact message string
         "x-signature": signature,
     }
-    body = {"client": "eoa"}  # Example body
+    body = {"client": "eoa"}
     session = requests.Session()
     r = session.post(url, headers=headers, json=body, timeout=30)
     print("[LLMM] Login status:", r.status_code)
