@@ -1,37 +1,35 @@
 #!/usr/bin/env python3
 """
-Limitless Exchange Crypto Markets Scanner
+Limitless Exchange Active Markets Scanner
 """
 
 import json
+import requests
 from limitless_auth import get_session
 
 API_URL = "https://api.limitless.exchange"
 
-def list_crypto_markets(session, page=1, limit=50):
-    """Fetch all active markets and filter for Crypto category."""
+def scan_active_markets(session, page=1, limit=10):
+    """Fetch active markets from Limitless Exchange."""
     url = f"{API_URL}/markets/active"
-    params = {"page": page, "limit": limit, "sortBy": "newest"}
+    params = {
+        "page": str(page),
+        "limit": str(limit),
+        "sortBy": "newest"
+    }
     r = session.get(url, params=params, timeout=30)
-    print("[LLMM] Markets status:", r.status_code)
+    print("[LLMM] Active markets status:", r.status_code)
     try:
         data = r.json()
-        crypto = []
-        for m in data.get("data", []):
-            cats = m.get("categories", [])
-            if any(c.lower() == "crypto" for c in cats):
-                crypto.append(m)
-        print(f"[LLMM] Found {len(crypto)} crypto markets")
-        for m in crypto:
-            print(f"- ID {m['id']} | {m['title']} | Status: {m['status']}")
-        return crypto
+        print(json.dumps(data, indent=2)[:1500])  # preview first 1500 chars
+        return data
     except ValueError:
         print("[LLMM] Raw response:", r.text)
-        return []
+        return {"raw": r.text}
 
 def main():
-    session = get_session()
-    list_crypto_markets(session)
+    session = get_session()  # reuse your authenticated session
+    scan_active_markets(session)
 
 if __name__ == "__main__":
     main()
