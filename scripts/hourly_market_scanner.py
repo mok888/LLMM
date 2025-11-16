@@ -8,8 +8,8 @@ import time
 API_URL = "https://api.limitless.exchange"
 
 def discover_hourly_market(page=1, limit=10, retries=3):
-    """Discover newest Hourly market via REST /markets/active/{page}."""
-    url = f"{API_URL}/markets/active/{page}"
+    """Discover newest Hourly market via REST /markets/active."""
+    url = f"{API_URL}/markets/active"
     params = {"page": str(page), "limit": str(limit), "sortBy": "newest"}
     print(f"[LLMM] Discovering Hourly markets: {url} {params}")
     for attempt in range(retries):
@@ -28,14 +28,16 @@ def discover_hourly_market(page=1, limit=10, retries=3):
             else:
                 print(f"[LLMM] Discovery failed: {r.status_code} {r.text}")
         except requests.exceptions.ReadTimeout:
-            print(f"[LLMM] Timeout on attempt {attempt+1}, retrying...")
-            time.sleep(2)
+            wait = 2 ** attempt
+            print(f"[LLMM] Timeout on attempt {attempt+1}, retrying in {wait}s...")
+            time.sleep(wait)
         except Exception as e:
             print("[LLMM] Discovery ERROR:", e)
             time.sleep(2)
     return None, None
 
 def test_rest_hourly(slug, label):
+    """Probe REST hourly endpoint for a given slug."""
     url = f"{API_URL}/api-v1/markets/{slug}/hourly"
     print(f"[LLMM] {label} REST hourly probe: {url}")
     try:
@@ -55,6 +57,7 @@ def test_rest_hourly(slug, label):
         print("[LLMM] REST ERROR:", e)
 
 async def test_ws(market_id):
+    """Subscribe to WS feed for a given market id."""
     uri = f"{API_URL}/api-v1/ws".replace("https", "wss")
     print(f"[LLMM] Testing WS: {uri}")
     try:
@@ -69,34 +72,4 @@ async def test_ws(market_id):
             print(f"[LLMM] Subscribed to market id={market_id}")
             for _ in range(5):
                 msg = await ws.recv()
-                print("[LLMM] WS EVENT:", msg)
-    except Exception as e:
-        print("[LLMM] WS ERROR:", e)
-
-async def hourly_scanner(slug, market_id):
-    while True:
-        now = datetime.datetime.now()
-        next_hour = (now.replace(minute=0, second=0, microsecond=0)
-                     + datetime.timedelta(hours=1))
-        before = next_hour - datetime.timedelta(seconds=5)
-        after = next_hour + datetime.timedelta(seconds=15)
-
-        # Sleep until 59:55
-        await asyncio.sleep((before - datetime.datetime.now()).total_seconds())
-        test_rest_hourly(slug, "PREVIOUS HOUR END")
-
-        # Sleep until 00:15
-        await asyncio.sleep((after - datetime.datetime.now()).total_seconds())
-        test_rest_hourly(slug, "NEXT HOUR START")
-        await test_ws(market_id)
-
-def main():
-    print("[LLMM] Starting Hourly market scanner...")
-    slug, market_id = discover_hourly_market(limit=10)
-    if slug and market_id:
-        asyncio.run(hourly_scanner(slug, market_id))
-    else:
-        print("[LLMM] No Hourly market available to scan.")
-
-if __name__ == "__main__":
-    main()
+                print("[LLMM] WS
