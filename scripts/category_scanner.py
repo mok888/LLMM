@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Limitless Exchange Continuous Category Scanner
-- Fetches all active markets (paginated, limit=25)
+- Fetches all active markets (paginated, limit=25, page=1,2,...)
 - Filters locally by categoryId using CATEGORY_MAP
 - Prints lifecycle banners for operator clarity
 """
@@ -26,10 +26,10 @@ CATEGORY_MAP: Dict[str, int] = {
     "billions-network-tge": 43,
 }
 
-def get_active_markets(session, limit=25, offset=0):
-    """Fetch active markets with pagination (limit <= 25)."""
+def get_active_markets(session, limit=25, page=1):
+    """Fetch active markets with pagination (limit <= 25, page-based)."""
     url = f"{API_URL}/markets/active"
-    params = {"limit": str(limit), "offset": str(offset)}
+    params = {"limit": str(limit), "page": str(page)}
     r = session.get(url, params=params, timeout=30)
     payload = r.json()
     return payload.get("markets", []) or payload.get("data", [])
@@ -37,15 +37,16 @@ def get_active_markets(session, limit=25, offset=0):
 def fetch_all_active(session):
     """Fetch all active markets by paginating until exhausted."""
     all_markets = []
-    offset = 0
+    page = 1
     batch_size = 25
 
     while True:
-        markets = get_active_markets(session, limit=batch_size, offset=offset)
+        markets = get_active_markets(session, limit=batch_size, page=page)
         if not markets:
             break
         all_markets.extend(markets)
-        offset += batch_size
+        print(f"[LLMM] Captured page {page}: {len(markets)} markets")
+        page += 1
         if len(markets) < batch_size:
             break
 
