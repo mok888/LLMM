@@ -4,7 +4,6 @@ Limitless Exchange Active Markets Scanner
 """
 
 import json
-import requests
 from limitless_auth import get_session
 
 API_URL = "https://api.limitless.exchange"
@@ -21,15 +20,18 @@ def scan_active_markets(session, page=1, limit=10):
     print("[LLMM] Active markets status:", r.status_code)
     try:
         data = r.json()
-        print(json.dumps(data, indent=2)[:1500])  # preview first 1500 chars
-        return data
+        markets = data.get("data", [])
+        print(f"[LLMM] Found {len(markets)} active markets")
+        for m in markets:
+            print(f"- ID {m['id']} | {m['title']} | Status: {m['status']} | Categories: {m.get('categories', [])}")
+        return markets
     except ValueError:
         print("[LLMM] Raw response:", r.text)
-        return {"raw": r.text}
+        return []
 
 def main():
     session = get_session()  # reuse your authenticated session
-    scan_active_markets(session)
+    scan_active_markets(session, page=1, limit=10)
 
 if __name__ == "__main__":
     main()
