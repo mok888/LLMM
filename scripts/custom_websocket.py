@@ -258,4 +258,49 @@ class CustomWebSocket:
             await asyncio.sleep(interval)
 
     async def periodic_probe(self, interval=60):
-        """Periodically request snapshots/pings
+        """Periodically request snapshots/pings; include server-tolerant payloads and swallow harmless server errors"""
+        while True:
+            try:
+                if not self.subscribed_markets:
+                    await asyncio.sleep(interval)
+                    continue
+
+                # Include only accepted keys (marketAddresses) and safe extras
+                payload = {
+                    "marketAddresses": self.subscribed_markets,
+                    "marketSlugs": []  # harmless if unused
+                }
+
+                # Try a list of common probe event names; server will respond or error
+                for ev in ("request_market_snapshot", "ping_prices", "requestPrices"):
+                    try:
+                        await self.sio.emit(ev, payload, namespace="/markets")
+                        print(f"[LLMM] Probe → emitted {ev} for {len(self.subscribed_markets)} markets")
+                    except Exception as inner:
+                        print(f"[LLMM] Probe emit {ev} error: {inner}")
+
+            except Exception as e:
+                print(f"[LLMM] Probe error: {e}")
+            await asyncio.sleep(interval)
+
+    async def monitor_silence(self, warn_after=300):
+        """Warn if we haven't seen non-system events for too long"""
+        while True:
+            if self.last_non_system_event_ts is None:
+                print("[LLMM] Silence monitor: no non-system events observed yet")
+            else:
+                delta = time() - self.last_non_system_event_ts
+                if delta > warn_after:
+                    print(f"[LLMM] Warning: {int(delta)}s without non-system events")
+            await asyncio.sleep(30)
+
+    async def wait(self):
+        await self.sio.wait()
+
+    async def close(self):
+        """Clean disconnect"""
+        try:
+            await self.sio.disconnect()
+            print("🔌 Disconnected cleanly")
+        except Exception as e:
+            print(f"⚠️ Error during disconnect: {e}")
