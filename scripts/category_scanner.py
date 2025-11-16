@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 """
-Limitless Exchange Continuous Category Scanner (BTC/ETH filter)
-Cycles through category IDs, fetches active markets, and prints lifecycle banners
-only for BTC/ETH tickers.
+Limitless Exchange Deep Category Scanner
+Fetches category IDs + totals, then scans all markets within each category.
 """
 
 import time
@@ -16,17 +15,16 @@ def get_categories(session):
     r = session.get(url, timeout=30)
     return r.json()
 
-def get_markets_by_category(session, category_id, limit=50):
+def get_markets_by_category(session, category_id, limit=100):
     """Fetch active markets for a given category ID."""
     url = f"{API_URL}/markets/active"
     params = {"category": category_id, "limit": str(limit)}
     r = session.get(url, params=params, timeout=30)
     return r.json().get("data", [])
 
-def continuous_scan(interval=120):
-    """Continuously scan categories and filter BTC/ETH markets."""
+def deep_scan(interval=180):
+    """Scan category IDs, then deep scan all markets inside each category."""
     session = get_session()
-    last_snapshot = {}
 
     while True:
         data = get_categories(session)
@@ -35,33 +33,20 @@ def continuous_scan(interval=120):
 
         print(f"\n[LLMM] Total active markets: {total}")
         for cat_id, count in categories.items():
+            print(f"[LLMM] Category {cat_id} → {count} markets")
+
             markets = get_markets_by_category(session, cat_id)
-            # Filter only BTC/ETH tickers
-            btc_eth_markets = [m for m in markets if m.get("ticker") in ("BTC", "ETH")]
-            current_ids = {m['id'] for m in btc_eth_markets}
+            if not markets:
+                print(f"  [LLMM] No markets found in category {cat_id}")
+                continue
 
-            prev_ids = last_snapshot.get(cat_id, set())
-            new_ids = current_ids - prev_ids
-            removed_ids = prev_ids - current_ids
-
-            if btc_eth_markets:
-                print(f"[LLMM] Category {cat_id} → {len(btc_eth_markets)} BTC/ETH markets")
-
-            if new_ids:
-                print(f"[LLMM] NEW BTC/ETH markets in category {cat_id}:")
-                for m in btc_eth_markets:
-                    if m['id'] in new_ids:
-                        print(f"  + {m['ticker']} | {m['title']} | Deadline {m['expirationDate']}")
-
-            if removed_ids:
-                print(f"[LLMM] REMOVED BTC/ETH markets in category {cat_id}:")
-                for mid in removed_ids:
-                    print(f"  - {mid}")
-
-            # Update snapshot
-            last_snapshot[cat_id] = current_ids
+            for m in markets:
+                ticker = m.get("ticker") or "N/A"
+                strike = m.get("strikePrice") or "N/A"
+                deadline = m.get("expirationDate") or "N/A"
+                print(f"  - {m['title']} | Ticker {ticker} | Strike {strike} | Deadline {deadline}")
 
         time.sleep(interval)
 
 if __name__ == "__main__":
-    continuous_scan(interval=120)  # refresh every 2 minutes
+    deep_scan(interval=180)  # refresh every 3 minutes
