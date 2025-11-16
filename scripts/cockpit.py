@@ -1,9 +1,6 @@
 #!/usr/bin/env python3
 """
 Limitless Exchange Cockpit
-- Loads hourly_markets.json
-- Connects WebSocket client
-- Starts refresh, probe, and silence monitor tasks
 """
 
 import asyncio
@@ -13,7 +10,7 @@ import sys
 from datetime import datetime
 from custom_websocket import CustomWebSocket
 
-REFRESH_INTERVAL = 300  # seconds
+REFRESH_INTERVAL = 300
 
 async def main():
     private_key = os.getenv("PRIVATE_KEY")
@@ -51,6 +48,7 @@ async def main():
 
         print("📡 Listening for events... Press Ctrl+C to stop")
         await client.wait()
+
     finally:
         await client.close()
 
