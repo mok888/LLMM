@@ -16,7 +16,11 @@ def list_crypto_markets(session, page=1, limit=50):
     print("[LLMM] Markets status:", r.status_code)
     try:
         data = r.json()
-        crypto = [m for m in data.get("data", []) if "Crypto" in m.get("categories", [])]
+        crypto = []
+        for m in data.get("data", []):
+            cats = m.get("categories", [])
+            if any(c.lower() == "crypto" for c in cats):
+                crypto.append(m)
         print(f"[LLMM] Found {len(crypto)} crypto markets")
         for m in crypto:
             print(f"- ID {m['id']} | {m['title']} | Status: {m['status']}")
