@@ -30,9 +30,12 @@ def login(account, message, signature):
     """Step 3: Login with headers and body, store session cookie."""
     url = f"{API_URL}/auth/login"
 
+    # Encode full message as hex for header
+    header_message = message.encode("utf-8").hex()
+
     headers = {
         "x-account": account,
-        "x-signing-message": message,   # exact message string
+        "x-signing-message": header_message,  # hex string
         "x-signature": signature,
     }
     body = {"client": "eoa"}
