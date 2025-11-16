@@ -1,86 +1,77 @@
+#!/usr/bin/env python3
+"""
+Limitless Exchange Authentication Script
+⚠️ Demo script for educational purposes.
+"""
+
 import os
 import requests
+from dotenv import load_dotenv
 from eth_account import Account
 from eth_account.messages import encode_defunct
-from dotenv import load_dotenv
 
 API_URL = "https://api.limitless.exchange"
 
-def get_signing_message():
-    """Step 1: Get signing message with nonce."""
-    url = f"{API_URL}/auth/signing-message"
-    r = requests.get(url, timeout=15)
-    r.raise_for_status()
-    try:
-        message = r.json()
-    except ValueError:
-        message = r.text
-    print("[LLMM] Signing message:", message)
-    return message
+def banner(msg): 
+    print(f"[LLMM] {msg}")
 
-def sign_message(message, private_key):
-    """Step 2: Sign the full message with Ethereum private key."""
+def get_signing_message():
+    """Fetch signing message from API."""
+    r = requests.get(f"{API_URL}/auth/signing-message", timeout=15)
+    r.raise_for_status()
+    return r.text
+
+def sign_message(message: str, private_key: str):
+    """Sign the full message string."""
     acct = Account.from_key(private_key)
     msg = encode_defunct(text=message)
     signed = Account.sign_message(msg, private_key)
-    print("[LLMM] Signed message with account:", acct.address)
-    return acct.address, signed.signature.hex()
+    sig_hex = signed.signature.hex()
+    if not sig_hex.startswith("0x"):
+        sig_hex = "0x" + sig_hex
+    return acct.address, sig_hex
 
-def login(account, message, signature):
-    """Step 3: Login with headers and body, store session cookie."""
-    url = f"{API_URL}/auth/login"
-
-    # Encode full message as hex for header
-    header_message = message.encode("utf-8").hex()
-
+def login(account: str, message: str, signature: str):
+    """Perform login handshake."""
+    hex_message = "0x" + message.encode("utf-8").hex()
     headers = {
         "x-account": account,
-        "x-signing-message": header_message,  # hex string
+        "x-signing-message": hex_message,
         "x-signature": signature,
+        "Content-Type": "application/json",
     }
     body = {"client": "eoa"}
-    session = requests.Session()
-    r = session.post(url, headers=headers, json=body, timeout=30)
-    print("[LLMM] Login status:", r.status_code)
-    print("[LLMM] Response:", r.text)
-    return session
+    s = requests.Session()
+    r = s.post(f"{API_URL}/auth/login", headers=headers, json=body, timeout=30)
+    banner(f"Login status: {r.status_code}")
+    banner(f"Login response: {r.text}")
+    return s, r
 
-def list_markets(session, page=1, limit=10):
-    """Step 4: Use session cookie to list markets."""
-    url = f"{API_URL}/markets/active"
-    params = {"page": str(page), "limit": str(limit), "sortBy": "newest"}
-    r = session.get(url, params=params, timeout=30)
-    print("[LLMM] Markets status:", r.status_code)
-    print("[LLMM] Response:", r.text[:500], "...")
-    try:
-        return r.json()
-    except ValueError:
-        return {"raw": r.text}
+def verify_auth(session: requests.Session):
+    """Verify session cookie."""
+    r = session.get(f"{API_URL}/auth/verify-auth", timeout=15)
+    banner(f"Verify status: {r.status_code}")
+    banner(f"Verify response: {r.text}")
 
 def main():
-    # Load environment variables from .env
     load_dotenv()
-    private_key = os.getenv("PRIVATE_KEY")
-
-    if not private_key:
-        raise RuntimeError("PRIVATE_KEY not found in .env file")
+    pk = os.getenv("PRIVATE_KEY")
+    if not pk:
+        raise RuntimeError("PRIVATE_KEY missing in .env")
 
     # Step 1: Get signing message
     message = get_signing_message()
+    banner(f"Signing message:\n{message}")
 
-    # Step 2: Sign message
-    account, signature = sign_message(message, private_key)
+    # Step 2: Sign full message
+    account, signature = sign_message(message, pk)
+    banner(f"Signed message with account: {account}")
 
     # Step 3: Login
-    session = login(account, message, signature)
+    session, resp = login(account, message, signature)
 
-    # Step 4: List markets
-    markets = list_markets(session, page=1, limit=20)
-    if "data" in markets:
-        for m in markets.get("data", []):
-            print(f"id={m['id']} slug={m['slug']} title={m['title']} categories={m.get('categories', [])}")
-    else:
-        print("[LLMM] Raw markets response:", markets)
+    # Step 4: Verify
+    verify_auth(session)
 
 if __name__ == "__main__":
     main()
