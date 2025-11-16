@@ -2,7 +2,7 @@
 """
 Limitless Exchange Continuous Category Scanner
 - Fetches all active markets (paginated, limit=25, page=1,2,...)
-- Filters locally by category labels (e.g. "Weekly", "Economy")
+- Filters locally by normalized category labels
 - Prints lifecycle banners for operator clarity
 """
 
@@ -25,6 +25,11 @@ CATEGORY_MAP: Dict[str, str] = {
     "korean": "Korean",
     "billions-network-tge": "Billions-Network-TGE",
 }
+
+def category_match(market, category_label: str) -> bool:
+    """Check if any category string contains the label (case-insensitive substring)."""
+    cats = [c.lower() for c in market.get("categories", [])]
+    return any(category_label.lower() in c for c in cats)
 
 def get_active_markets(session, limit=25, page=1):
     """Fetch active markets with pagination (limit <= 25, page-based)."""
@@ -62,7 +67,7 @@ def continuous_scan(interval=180):
         print(f"\n[LLMM] Total active markets: {len(all_markets)}")
 
         for label, category in CATEGORY_MAP.items():
-            filtered = [m for m in all_markets if category in m.get("categories", [])]
+            filtered = [m for m in all_markets if category_match(m, category)]
             current_ids = {m['id'] for m in filtered}
             prev_ids = last_snapshot.get(category, set())
 
@@ -76,11 +81,11 @@ def continuous_scan(interval=180):
                 for m in filtered:
                     if m['id'] in new_ids:
                         title = m.get("title") or m.get("slug") or "N/A"
-                        ticker = m.get("ticker") or "N/A"
                         deadline = m.get("expirationDate") or "N/A"
                         prices = m.get("prices") or []
                         volume = m.get("volumeFormatted") or m.get("volume") or "N/A"
-                        print(f"    + {title} | Ticker {ticker} | Deadline {deadline} | Prices {prices} | Volume {volume}")
+                        cats = m.get("categories", [])
+                        print(f"    + {title} | Deadline {deadline} | Prices {prices} | Volume {volume} | Categories {cats}")
 
             if removed_ids:
                 print(f"  [LLMM] REMOVED markets in {label}:")
