@@ -59,8 +59,21 @@ class CustomWebSocket:
             if len(prices) == 2:
                 yes, no = prices
 
-            # ✅ Fixed fallback line
             title = self.market_titles.get(cid, cid[:6] + "…")
             print(f"[LLMM] {title} → YES={yes} | NO={no} | Vol={vol}")
 
-        @self.sio.event
+        @self.sio.event(namespace="/markets")
+        async def positions(data):
+            account = data.get("account")
+            positions = data.get("positions", [])
+            print(f"[LLMM] User {account} has {len(positions)} positions")
+
+        @self.sio.event(namespace="/markets")
+        async def exception(data):
+            print(f"[LLMM] Exception: {json.dumps(data)}")
+
+        # Catch-all logger
+        @self.sio.on("*", namespace="/markets")
+        async def catch_all(event, data):
+            try:
+                print(f"[LLMM] Raw event: {event} →
